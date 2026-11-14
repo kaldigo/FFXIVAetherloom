@@ -1,1 +1,2 @@
-Test the embedded character view with your current gear. Use the rotation and zoom controls in Aetherloom, including in duties.
+Control the preview with the mouse. Left-drag to rotate, right-drag to pan, and scroll to zoom.
+Try a color behind the game texture with Preview backdrop. Its alpha starts at zero.

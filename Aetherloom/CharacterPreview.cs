@@ -25,7 +25,9 @@ internal sealed unsafe class CharacterPreview : IDisposable
     private CharaView* view;
     private bool requested;
     private nint player, textureId;
-    private float aspect, rotate;
+    private float aspect;
+    private Vector2 rotate, pan;
+    private Vector4 backdrop = new(0.12f, 0.30f, 0.44f, 0f);
     private float zoomDelta;
     private long lastImageOrStart, lastDraw;
     private bool cameraReady;
@@ -69,13 +71,28 @@ internal sealed unsafe class CharacterPreview : IDisposable
         }
 
         var width = Math.Min(ImGui.GetContentRegionAvail().X, 380 * ImGui.GetIO().FontGlobalScale * aspect);
-        ImGui.Image(new ImTextureID((ulong)textureId), new Vector2(width, width / aspect));
-        if (ImGui.Button("Rotate left")) rotate -= 20;
-        ImGui.SameLine();
-        if (ImGui.Button("Rotate right")) rotate += 20;
-        if (ImGui.Button("Zoom in")) zoomDelta -= 1;
-        ImGui.SameLine();
-        if (ImGui.Button("Zoom out")) zoomDelta += 1;
+        if (width <= 0) return;
+        ImGui.InvisibleButton("##character-camera", new Vector2(width, width / aspect),
+            ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight);
+        var drawList = ImGui.GetWindowDrawList();
+        var min = ImGui.GetItemRectMin();
+        var max = ImGui.GetItemRectMax();
+        drawList.AddRectFilled(min, max, ImGui.GetColorU32(backdrop));
+        drawList.AddImage(new ImTextureID((ulong)textureId), min, max);
+        var io = ImGui.GetIO();
+        if (ImGui.IsItemHovered())
+        {
+            ImGuiP.SetItemUsingMouseWheel();
+            zoomDelta -= io.MouseWheel;
+        }
+        if (ImGui.IsItemActive())
+        {
+            var delta = io.MouseDelta / io.FontGlobalScale;
+            if (ImGui.IsMouseDragging(ImGuiMouseButton.Left)) rotate += delta;
+            else if (ImGui.IsMouseDragging(ImGuiMouseButton.Right)) pan += delta;
+        }
+        ImGui.TextDisabled("Left-drag to rotate, right-drag to pan, scroll to zoom.");
+        ImGui.ColorEdit4("Preview backdrop", ref backdrop, ImGuiColorEditFlags.AlphaBar);
     }
 
     private void Update(IFramework _)
@@ -129,8 +146,9 @@ internal sealed unsafe class CharacterPreview : IDisposable
                 view->ResetPositions();
                 cameraReady = true;
             }
-            if (cameraReady && rotate != 0) view->SetCameraYawAndPitch(rotate, 0);
-            rotate = 0;
+            if (cameraReady && rotate != Vector2.Zero) view->SetCameraYawAndPitch(rotate.X, rotate.Y);
+            if (cameraReady && pan != Vector2.Zero) view->SetCameraXAndY(pan.X, pan.Y);
+            rotate = pan = Vector2.Zero;
             if (cameraReady && zoomDelta != 0) view->SetCameraDistance(zoomDelta);
             zoomDelta = 0;
             var targets = RenderTargetManager.Instance();
@@ -193,7 +211,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
         if (view == null) return;
         textureId = 0;
         zoomDelta = 0;
-        rotate = 0;
+        rotate = pan = Vector2.Zero;
         cameraReady = false;
         view->Release();
         view->Dtor(1);
