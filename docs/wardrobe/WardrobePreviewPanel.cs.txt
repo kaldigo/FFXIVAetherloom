@@ -1,0 +1,198 @@
+using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Game.Addon.Lifecycle;
+using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
+using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.Graphics.Render;
+using FFXIVClientStructs.FFXIV.Client.System.Memory;
+using FFXIVClientStructs.FFXIV.Client.UI.Misc;
+using Glamourer.Designs;
+using Glamourer.Services;
+using ImSharp;
+using Penumbra.GameData.Enums;
+using Penumbra.GameData.Gui.Debug;
+using Penumbra.GameData.Structs;
+
+namespace Glamourer.Gui.Tabs.DebugTab;
+
+public sealed unsafe class WardrobePreviewPanel : IGameDataDrawer, IDisposable
+{
+    // Card8 is outside the fitting-room and glamour-plate views. Party portraits also use it.
+    private const uint Slot = 7;
+    private readonly IObjectTable _objects;
+    private readonly IPartyList _party;
+    private readonly ICondition _condition;
+    private readonly IFramework _framework;
+    private readonly IAddonLifecycle _addons;
+    private readonly DesignFileSystem _designs;
+    private readonly CustomizeService _customizations;
+    private CharaViewPortrait* _portrait;
+    private nint _player;
+    private long _lastDraw;
+    private string _status = "Select a design in Designs, then start the preview here.";
+    private byte _zoom = 60;
+    private static readonly EquipSlot[] GearSlots = [EquipSlot.MainHand, EquipSlot.OffHand, EquipSlot.Head,
+        EquipSlot.Body, EquipSlot.Hands, EquipSlot.Unknown, EquipSlot.Legs, EquipSlot.Feet, EquipSlot.Ears,
+        EquipSlot.Neck, EquipSlot.Wrists, EquipSlot.RFinger, EquipSlot.LFinger];
+    private static readonly CustomizeIndex[] Appearance = [CustomizeIndex.Hairstyle, CustomizeIndex.HairColor,
+        CustomizeIndex.Highlights, CustomizeIndex.HighlightsColor, CustomizeIndex.FacePaint,
+        CustomizeIndex.FacePaintReversed, CustomizeIndex.FacePaintColor];
+
+    public WardrobePreviewPanel(IObjectTable objects, IPartyList party, ICondition condition, IFramework framework,
+        IAddonLifecycle addons, DesignFileSystem designs, CustomizeService customizations)
+    {
+        (_objects, _party, _condition, _framework, _addons, _designs, _customizations)
+            = (objects, party, condition, framework, addons, designs, customizations);
+        framework.Update += Update;
+        addons.RegisterListener(AddonEvent.PreSetup, "BannerParty", OnPartyPortraits);
+    }
+
+    public ReadOnlySpan<byte> Label => "Wardrobe preview prototype"u8;
+    public bool Disabled => false;
+
+    private bool Available => _objects.LocalPlayer != null && _party.Length == 0
+        && !_condition[ConditionFlag.BoundByDuty] && !_condition[ConditionFlag.BetweenAreas]
+        && !_condition[ConditionFlag.BetweenAreas51];
+
+    public void Draw()
+    {
+        var design = _designs.Selection.Selection?.Value as Design;
+        _lastDraw = Environment.TickCount64;
+        Im.Text($"Design: {design?.Name ?? "(current equipment)"}");
+        if (_portrait == null)
+        {
+            Im.Text(_status);
+            using var disable = Im.Disabled(!Available);
+            if (Im.Button("Start embedded preview"u8))
+                Start(design);
+            return;
+        }
+
+        if (Im.Button("Stop preview"u8))
+        {
+            Stop();
+            return;
+        }
+        Im.Line.Same();
+        if (Im.Button("Refresh design"u8))
+        {
+            Stop();
+            Start(design);
+            return;
+        }
+
+        if (_portrait->State != 6 || !_portrait->CharacterLoaded)
+        {
+            Im.Text("Loading character..."u8);
+            return;
+        }
+
+        var manager = RenderTargetManager.Instance();
+        var texture = manager == null ? null : manager->GetCharaViewTexture(Slot);
+        if (texture == null || texture->D3D11ShaderResourceView == null || texture->ActualHeight == 0)
+        {
+            Im.Text("Waiting for the character texture..."u8);
+            return;
+        }
+
+        float height = 380 * Im.Style.GlobalScale;
+        Im.Image.Draw(new ImTextureId((nint)texture->D3D11ShaderResourceView),
+            new Vector2(height * texture->ActualWidth / texture->ActualHeight, height));
+        if (Im.Button("Rotate left"u8))
+            _portrait->SetCameraYawAndPitch(-0.25f, 0);
+        Im.Line.Same();
+        if (Im.Button("Rotate right"u8))
+            _portrait->SetCameraYawAndPitch(0.25f, 0);
+        Im.Line.Same();
+        if (Im.Button("Zoom in"u8))
+            _portrait->SetCameraZoom(_zoom = (byte)Math.Min(200, _zoom + 15));
+        Im.Line.Same();
+        if (Im.Button("Zoom out"u8))
+            _portrait->SetCameraZoom(_zoom = (byte)Math.Max(0, _zoom - 15));
+    }
+
+    private void Start(Design? design)
+    {
+        if (!Available || _objects[(int)ScreenActor.Card8] != null)
+        {
+            _status = "Preview slot unavailable. Try again while solo outside a duty.";
+            return;
+        }
+        CharaViewCharacterData data = default;
+        data.Ctor();
+        data.ImportLocalPlayerEquipment();
+        if (design != null && design.DesignData.IsHuman)
+        {
+            for (var i = 0; i < GearSlots.Length; i++)
+            {
+                var slot = GearSlots[i];
+                if (slot == EquipSlot.Unknown)
+                    continue;
+                if (design.DoApplyEquip(slot))
+                {
+                    var item = design.DesignData.Item(slot);
+                    data.ItemIds[i] = item.ItemId.Id >= 1_000_000 ? 0 : item.ItemId.Id;
+                }
+                if (design.DoApplyStain(slot))
+                {
+                    var stains = design.DesignData.Stain(slot);
+                    data.ItemStain0Ids[i] = stains.Stain1.Id;
+                    data.ItemStain1Ids[i] = stains.Stain2.Id;
+                }
+            }
+            ref var customize = ref *(CustomizeArray*)&data.CustomizeData;
+            foreach (var index in Appearance)
+            {
+                var value = design.DesignData.Customize[index];
+                if (design.DoApplyCustomize(index)
+                 && _customizations.IsCustomizationValid(customize.Clan, customize.Gender, customize.Face, index, value))
+                    customize[index] = value;
+            }
+        }
+
+        var space = IMemorySpace.GetUISpace();
+        if (space == null)
+            return;
+        var memory = (CharaViewPortrait*)space->Malloc((ulong)sizeof(CharaViewPortrait), 16);
+        if (memory == null)
+            return;
+        _portrait = memory->Ctor();
+        _player = _objects.LocalPlayer!.Address;
+        _portrait->Setup(Slot, &data, null, 0, 0);
+        _portrait->ToggleCharacterVisibility(true);
+        _portrait->ResetCamera();
+        _portrait->SetCameraZoom(_zoom);
+    }
+
+    private void Update(IFramework framework)
+    {
+        if (_portrait == null)
+            return;
+        if (!Available || _objects.LocalPlayer?.Address != _player || Environment.TickCount64 - _lastDraw > 350)
+        {
+            Stop();
+            return;
+        }
+        var native = FFXIVClientStructs.FFXIV.Client.System.Framework.Framework.Instance();
+        if (native != null)
+            _portrait->Render(native->FrameCounter);
+    }
+
+    private void OnPartyPortraits(AddonEvent evt, AddonArgs args) => Stop();
+
+    private void Stop()
+    {
+        var portrait = _portrait;
+        _portrait = null;
+        if (portrait == null)
+            return;
+        portrait->Release();
+        portrait->Dtor(1);
+    }
+
+    public void Dispose()
+    {
+        _framework.Update -= Update;
+        _addons.UnregisterListener(AddonEvent.PreSetup, "BannerParty", OnPartyPortraits);
+        Stop();
+    }
+}

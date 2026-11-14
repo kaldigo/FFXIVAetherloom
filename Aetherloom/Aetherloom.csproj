@@ -1,0 +1,15 @@
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <Version>0.1.0.0</Version>
+    <Name>Aetherloom</Name>
+    <Author>kaldigo</Author>
+    <Punchline>Plan outfits from your FFXIV wardrobe.</Punchline>
+    <Description>Inspect Glamourer designs against the current character's carried and stored equipment.</Description>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="WardrobeExceptions.json" />
+  </ItemGroup>
+</Project>
