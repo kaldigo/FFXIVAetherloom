@@ -5,6 +5,8 @@ using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Render;
+using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
+using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
 using FFXIVClientStructs.FFXIV.Client.System.Memory;
 using FFXIVClientStructs.FFXIV.Client.UI.Misc;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
@@ -23,6 +25,9 @@ internal sealed unsafe class CharacterPreview : IDisposable
     private readonly IAddonLifecycle addons;
     private readonly IPluginLog log;
     private CharaView* view;
+    private OffscreenRenderingManager* backgroundOwner;
+    private Texture* previousBackground;
+    private Texture* transparentBackground;
     private bool requested;
     private nint player, textureId;
     private float aspect;
@@ -89,7 +94,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
         {
             var delta = io.MouseDelta / io.FontGlobalScale;
             if (ImGui.IsMouseDragging(ImGuiMouseButton.Left)) rotate += delta;
-            else if (ImGui.IsMouseDragging(ImGuiMouseButton.Right)) pan += delta;
+            else if (ImGui.IsMouseDragging(ImGuiMouseButton.Right)) pan -= delta;
         }
         ImGui.TextDisabled("Left-drag to rotate, right-drag to pan, scroll to zoom.");
         ImGui.ColorEdit4("Preview backdrop", ref backdrop, ImGuiColorEditFlags.AlphaBar);
@@ -139,6 +144,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
         var stage = "Waiting for the native character renderer.";
         if (view->State == 6)
         {
+            if (backgroundOwner == null) SetTransparentBackground();
             var character = view->GetCharacter();
             var hasModel = character != null && character->GetCharacterBase() != null;
             if (!cameraReady && view->Camera != null && hasModel)
@@ -186,6 +192,41 @@ internal sealed unsafe class CharacterPreview : IDisposable
         log.Information($"Preview slot {Slot}, state {view->State}, base loaded={view->CharacterLoaded}. {stage}");
     }
 
+    private void SetTransparentBackground()
+    {
+        var renderer = OffscreenRenderingManager.Instance();
+        var utility = CharacterUtility.Instance();
+        if (renderer == null || utility == null || utility->TransparentTextureResourceHandle == null) return;
+        var texture = utility->TransparentTextureResourceHandle->Texture;
+        if (texture == null) return;
+
+        // Transfer the slot's existing reference to this preview until it closes.
+        texture->IncRef();
+        previousBackground = renderer->BackgroundTextures[(int)Slot];
+        renderer->BackgroundTextures[(int)Slot] = texture;
+        transparentBackground = texture;
+        backgroundOwner = renderer;
+        log.Information($"Installed transparent renderer background for preview slot {Slot}.");
+    }
+
+    private void RestoreBackground()
+    {
+        if (backgroundOwner == null) return;
+        if (OffscreenRenderingManager.Instance() == backgroundOwner
+            && backgroundOwner->BackgroundTextures[(int)Slot].Value == transparentBackground)
+        {
+            backgroundOwner->BackgroundTextures[(int)Slot] = previousBackground;
+            transparentBackground->DecRef();
+        }
+        else if (previousBackground != null)
+        {
+            // The renderer already replaced its copy and released that reference.
+            previousBackground->DecRef();
+        }
+        backgroundOwner = null;
+        transparentBackground = previousBackground = null;
+    }
+
     private void OnPartyPortraits(AddonEvent evt, AddonArgs args)
     {
         if (requested || view != null) Pause("Preview paused for party portraits.");
@@ -213,6 +254,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
         zoomDelta = 0;
         rotate = pan = Vector2.Zero;
         cameraReady = false;
+        RestoreBackground();
         view->Release();
         view->Dtor(1);
         view = null;

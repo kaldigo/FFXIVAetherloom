@@ -1,2 +1,1 @@
-Control the preview with the mouse. Left-drag to rotate, right-drag to pan, and scroll to zoom.
-Try a color behind the game texture with Preview backdrop. Its alpha starts at zero.
+Use the game's transparent texture as the preview slot background. Reverse both right-drag pan axes so the model follows the drag.
