@@ -1,1 +1,1 @@
-Check the portrait texture as soon as the native renderer is ready. Preview messages and the Dalamud log now identify the stage of a timeout.
+Initialize the embedded portrait camera with the supplied character data and show the preview once the character model is ready. If loading stalls, the preview and Dalamud log now identify whether the actor, model, camera, or texture is still pending.

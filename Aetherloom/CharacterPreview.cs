@@ -123,7 +123,10 @@ internal sealed unsafe class CharacterPreview : IDisposable
             if (memory == null) { Stop("Could not allocate the character preview."); return; }
             portrait = memory->Ctor();
             portrait->Setup(Slot, &data, null, 0, 0);
-            portrait->ToggleCharacterVisibility(true);
+            // Native portrait previews acknowledge the supplied character data and
+            // initialize their framing before the first render.
+            portrait->CharaViewPortraitCharacterDataCopied = true;
+            portrait->ResetCamera();
             player = actor.Address;
             loaded = design;
             lastImageOrStart = Environment.TickCount64;
@@ -135,8 +138,11 @@ internal sealed unsafe class CharacterPreview : IDisposable
         var stage = "Waiting for the native portrait renderer.";
         if (portrait->State == 6)
         {
-            if (!cameraReady && portrait->Camera != null)
+            var character = portrait->GetCharacter();
+            var hasModel = character != null && character->GetCharacterBase() != null;
+            if (!cameraReady && portrait->Camera != null && hasModel)
             {
+                portrait->ToggleCharacterVisibility(true);
                 portrait->ResetCamera();
                 portrait->SetCameraZoom((byte)zoom);
                 portrait->SetAmbientLightingColor(255, 255, 255);
@@ -150,7 +156,8 @@ internal sealed unsafe class CharacterPreview : IDisposable
             if (cameraReady && portrait->CameraZoom != zoom) portrait->SetCameraZoom((byte)zoom);
             var targets = RenderTargetManager.Instance();
             var texture = targets == null ? null : targets->GetCharaViewTexture(Slot);
-            if (texture != null && texture->D3D11ShaderResourceView != null && texture->ActualWidth > 0 && texture->ActualHeight > 0)
+            if (cameraReady && hasModel && portrait->CharaViewPortraitCharacterLoaded
+                && texture != null && texture->D3D11ShaderResourceView != null && texture->ActualWidth > 0 && texture->ActualHeight > 0)
             {
                 aspect = (float)texture->ActualWidth / texture->ActualHeight;
                 textureId = (nint)texture->D3D11ShaderResourceView;
@@ -158,7 +165,11 @@ internal sealed unsafe class CharacterPreview : IDisposable
                 lastImageOrStart = Environment.TickCount64;
                 return;
             }
-            stage = targets == null ? "Waiting for the render target manager."
+            stage = character == null ? "Waiting for the portrait character."
+                : !hasModel ? "Waiting for the character model."
+                : portrait->Camera == null ? "Waiting for the portrait camera."
+                : !portrait->CharaViewPortraitCharacterLoaded ? $"Waiting for the portrait to show the model (render flags {character->RenderFlags})."
+                : targets == null ? "Waiting for the render target manager."
                 : texture == null ? "Waiting for the portrait texture."
                 : texture->D3D11ShaderResourceView == null ? "Waiting for the portrait texture's shader view."
                 : "Waiting for nonzero portrait texture dimensions.";
