@@ -1,1 +1,1 @@
-Preview a selected Glamourer design on a copy of your character. Compare its gear, accessories, dyes, hair and face paint with your current look, or switch designs while the preview is open.
+Preview a design's enabled hairstyle whenever the game lists it for your character, including designs saved on a different clan or face. The preview log now records the equipped, requested and selected hairstyle IDs.

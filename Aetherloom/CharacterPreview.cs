@@ -198,8 +198,10 @@ internal sealed unsafe class CharacterPreview : IDisposable
                     Stop("Select a player-character design to preview.");
                     return;
                 }
+                var currentHair = model.CustomizeData.Hairstyle;
                 notes = PreviewOutfit.Apply(ref model, gear, look, data);
-                log.Information($"Prepared selected design for preview. {notes}");
+                var hair = look["Hairstyle"];
+                log.Information($"Prepared design preview: current hair={currentHair}, design hair={hair?.Value<byte?>("Value")}, apply={hair?.Value<bool>("Apply") == true}, preview hair={model.CustomizeData.Hairstyle}. {notes}");
             }
             var space = IMemorySpace.GetUISpace();
             var memory = space == null ? null : (CharaView*)space->Malloc((ulong)sizeof(CharaView), 16);

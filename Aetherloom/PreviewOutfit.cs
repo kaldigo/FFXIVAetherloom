@@ -69,14 +69,40 @@ internal static class PreviewOutfit
         foreach (var (key, index, mask) in Appearance)
         {
             if (look[key] is not JObject field || !field.Value<bool>("Apply")) continue;
-            if (key == "Hairstyle" && (look["Clan"]?.Value<byte>("Value") != bytes[4]
-                || look["Gender"]?.Value<byte>("Value") != bytes[1] || look["Face"]?.Value<byte>("Value") != bytes[5]))
+            var value = field.Value<byte>("Value");
+            if (key == "Hairstyle" && value != bytes[index] && !SupportsHairstyle(data, bytes[4], bytes[1], bytes[0], bytes[5], value))
             {
-                skipped.Add("hairstyle (different clan, gender or face)");
+                skipped.Add($"hairstyle {value} (unavailable for this character)");
                 continue;
             }
-            bytes[index] = (byte)((bytes[index] & ~mask) | (field.Value<byte>("Value") & mask));
+            bytes[index] = (byte)((bytes[index] & ~mask) | (value & mask));
         }
         return skipped.Count == 0 ? "" : $"Kept your equipped appearance for {string.Join(", ", skipped)}.";
+    }
+
+    private static bool SupportsHairstyle(IDataManager data, byte tribe, byte sex, byte race, byte face, byte hairstyle)
+    {
+        if (tribe == 0 || sex > 1) return false;
+        var rowId = (uint)((tribe - 1) * 2 + sex);
+        if (!data.GetExcelSheet<HairMakeType>().TryGetRow(rowId, out var options)) return false;
+        var features = data.GetExcelSheet<CharaMakeCustomize>();
+        foreach (var menu in options.CharaMakeStruct)
+        {
+            if (menu.Customize != 6) continue;
+            for (var i = 0; i < menu.SubMenuNum && i < menu.SubMenuParam.Count; i++)
+            {
+                var id = menu.SubMenuParam[i];
+                if (id == uint.MaxValue) continue;
+                if (!features.TryGetRow(id, out var feature))
+                {
+                    if (i == hairstyle) return true;
+                    continue;
+                }
+                if (feature.FeatureID != hairstyle) continue;
+                // Hrothgar hair can be face-specific; the sheet uses face IDs 5–8.
+                if (race != 7 || feature.Unknown0 == 0 || feature.Unknown0 == (face <= 4 ? face + 4 : face)) return true;
+            }
+        }
+        return false;
     }
 }
