@@ -14,15 +14,18 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ICommandManager commands;
     private readonly WardrobeOwnership ownership;
     private readonly WindowSystem windows = new("Aetherloom");
+    private readonly CharacterPreview preview;
     private readonly WardrobeWindow window;
 
     public Plugin(IDalamudPluginInterface plugin, ICommandManager commands, IFramework framework,
-        IPlayerState player, IClientState client, IDataManager data, IPluginLog log)
+        IPlayerState player, IClientState client, IDataManager data, IPluginLog log,
+        IPartyList party, ICondition conditions, IObjectTable objects, IAddonLifecycle addons)
     {
         this.plugin = plugin;
         this.commands = commands;
         ownership = new(framework, player, client, plugin, data, log);
-        window = new(plugin, data, ownership);
+        preview = new(framework, party, conditions, objects, addons);
+        window = new(plugin, data, ownership, preview);
         windows.AddWindow(window);
         plugin.UiBuilder.Draw += windows.Draw;
         plugin.UiBuilder.OpenMainUi += Open;
@@ -40,17 +43,22 @@ public sealed class Plugin : IDalamudPlugin
         plugin.UiBuilder.OpenMainUi -= Open;
         plugin.UiBuilder.Draw -= windows.Draw;
         windows.RemoveAllWindows();
+        preview.Dispose();
         ownership.Dispose();
     }
 }
 
-internal sealed class WardrobeWindow(IDalamudPluginInterface plugin, IDataManager data, WardrobeOwnership ownership)
+internal sealed class WardrobeWindow(IDalamudPluginInterface plugin, IDataManager data, WardrobeOwnership ownership, CharacterPreview preview)
     : Window("Aetherloom")
 {
     private Dictionary<Guid, string> designs = [];
+    private readonly JObject currentEquipment = new() { ["Equipment"] = new JObject(), ["Customize"] = new JObject() };
     private Guid selected;
-    private JObject? equipment;
+    private JObject? design;
+    private JObject? equipment => design?["Equipment"] as JObject;
     private string? error;
+
+    public override void OnClose() => preview.Close();
 
     public override void OnOpen() => Refresh();
 
@@ -66,7 +74,7 @@ internal sealed class WardrobeWindow(IDalamudPluginInterface plugin, IDataManage
         catch (Dalamud.Plugin.Ipc.Exceptions.IpcError)
         {
             designs.Clear();
-            equipment = null;
+            design = null;
             error = "Enable Glamourer, then refresh designs.";
         }
     }
@@ -75,13 +83,13 @@ internal sealed class WardrobeWindow(IDalamudPluginInterface plugin, IDataManage
     {
         try
         {
-            equipment = selected == Guid.Empty ? null : plugin.GetIpcSubscriber<Guid, JObject?>("Glamourer.GetDesignJObject")
-                .InvokeFunc(selected)?["Equipment"] as JObject;
+            design = selected == Guid.Empty ? null : plugin.GetIpcSubscriber<Guid, JObject?>("Glamourer.GetDesignJObject")
+                .InvokeFunc(selected);
             error = equipment == null && selected != Guid.Empty ? "Design unavailable. Refresh designs." : null;
         }
         catch (Dalamud.Plugin.Ipc.Exceptions.IpcError)
         {
-            equipment = null;
+            design = null;
             error = "Glamourer is unavailable. Refresh designs.";
         }
     }
@@ -92,6 +100,11 @@ internal sealed class WardrobeWindow(IDalamudPluginInterface plugin, IDataManage
         if (designs.Count == 0)
         {
             ImGui.TextUnformatted(error ?? "No saved designs in Glamourer. Save a design there, then refresh.");
+            if (ownership.Character != 0)
+            {
+                ImGui.TextUnformatted("Preview current equipment");
+                preview.Draw(currentEquipment);
+            }
             return;
         }
         ImGui.SameLine();
@@ -108,6 +121,7 @@ internal sealed class WardrobeWindow(IDalamudPluginInterface plugin, IDataManage
         }
         if (error != null) { ImGui.TextUnformatted(error); return; }
         if (ownership.Character == 0) { ImGui.TextUnformatted("Log in to check this character’s equipment."); return; }
+        if (design != null) preview.Draw(design);
         if (equipment == null || !ImGui.BeginTable("Equipment", 3)) return;
         ImGui.TableSetupColumn("Slot");
         ImGui.TableSetupColumn("Item");

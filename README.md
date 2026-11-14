@@ -4,7 +4,9 @@ A standalone Dalamud companion for planning outfits with Glamourer. Open `/aethe
 
 Each character has their own inventory, Armoury Chest, equipped gear, glamour dresser and armoire snapshots. The plugin counts the actual item even if it has another glamour applied. It retains the last complete snapshot for each source across sessions and can seed dresser and armoire data from the earlier Glamourer fork. Open both storage windows once if a piece shows **Unconfirmed**. Event and Mog Station exemptions use the catalog in `Aetherloom/WardrobeExceptions.json`. An overlapping normal acquisition source takes precedence.
 
-The first build provides an ownership inspector. The editor, filtered copies for Glamourer automation, and transfer to native glamour plates are described in the [UI plan](docs/wardrobe-ui-plan.md). Plate transfers require actual dresser or armoire stock.
+To try the embedded preview, open the window while solo outside a duty, select an outfit that looks different from your equipped gear, and click **Start embedded preview**. Rotate and zoom, then switch designs. Open the Fitting Room or a glamour plate alongside it to compare the two views. The prototype uses the eighth portrait target and releases it when closed or when party portraits need it. If the texture fails to load, the window reports its portrait state after 15 seconds.
+
+The editor, filtered copies for Glamourer automation, and transfer to native glamour plates are described in the [UI plan](docs/wardrobe-ui-plan.md). Plate transfers require actual dresser or armoire stock.
 
 ## Development
 
