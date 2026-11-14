@@ -12,6 +12,7 @@ using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
 using FFXIVClientStructs.FFXIV.Client.System.Memory;
 using FFXIVClientStructs.FFXIV.Client.UI.Misc;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
+using Newtonsoft.Json.Linq;
 
 namespace Aetherloom;
 
@@ -26,6 +27,10 @@ internal sealed unsafe class CharacterPreview : IDisposable
     private readonly IObjectTable objects;
     private readonly IAddonLifecycle addons;
     private readonly IPluginLog log;
+    private readonly IDataManager data;
+    private JObject? selectedDesign, loadedDesign;
+    private bool previewDesign;
+    private string notes = "";
     private CharaView* view;
     private OffscreenRenderingManager* backgroundOwner;
     private Texture* previousBackground;
@@ -53,10 +58,11 @@ internal sealed unsafe class CharacterPreview : IDisposable
     private string status = "";
     private (uint State, bool BaseLoaded, string Stage)? lastProgress;
 
-    public CharacterPreview(IFramework framework, IGameGui gameGui, ICondition conditions, IObjectTable objects, IAddonLifecycle addons, IPluginLog log)
+    public CharacterPreview(IFramework framework, IGameGui gameGui, ICondition conditions, IObjectTable objects, IAddonLifecycle addons, IPluginLog log, IDataManager data)
     {
         (this.framework, this.gameGui, this.conditions, this.objects, this.addons) = (framework, gameGui, conditions, objects, addons);
         this.log = log;
+        this.data = data;
         framework.Update += Update;
         addons.RegisterListener(AddonEvent.PreSetup, "BannerParty", OnPartyPortraits);
     }
@@ -69,22 +75,35 @@ internal sealed unsafe class CharacterPreview : IDisposable
         status = "";
     }
 
-    public void Draw()
+    public void Draw(JObject? design = null)
     {
         lastDraw = Environment.TickCount64;
+        selectedDesign = design;
+        if (design == null && previewDesign && requested) Close();
+        if (design != null && (!requested || !previewDesign))
+        {
+            if (ImGui.Button("Preview selected design"))
+            {
+                previewDesign = true;
+                requested = true;
+                status = "";
+            }
+            ImGui.SameLine();
+        }
+        if ((!requested || previewDesign) && ImGui.Button("Preview current gear"))
+        {
+            previewDesign = false;
+            requested = true;
+            status = "";
+        }
         if (!requested)
         {
-            if (ImGui.Button("Preview current gear"))
-            {
-                status = "";
-                requested = true;
-            }
             if (status.Length != 0) ImGui.TextWrapped(status);
             return;
         }
 
         if (ImGui.Button("Stop preview")) { Close(); return; }
-        if (textureId == 0)
+        if (textureId == 0 || !ReferenceEquals(loadedDesign, previewDesign ? design : null))
         {
             ImGui.TextUnformatted(status.Length == 0 ? "Loading character preview..." : status);
             return;
@@ -107,6 +126,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
         HandleCameraDrag(io.FontGlobalScale);
         ImGui.TextDisabled("Left-drag to rotate, right-drag to pan, scroll to zoom.");
         ImGui.Combo("Preview backdrop", ref background, BackgroundNames, BackgroundNames.Length);
+        if (notes.Length > 0) ImGui.TextWrapped(notes);
     }
 
     private void HandleCameraDrag(float scale)
@@ -140,6 +160,8 @@ internal sealed unsafe class CharacterPreview : IDisposable
     private void Update(IFramework _)
     {
         if (!requested) { Release(); return; }
+        var desired = previewDesign ? selectedDesign : null;
+        if (view != null && !ReferenceEquals(desired, loadedDesign)) Release();
         if (conditions[ConditionFlag.BetweenAreas] || conditions[ConditionFlag.BetweenAreas51]
             || objects.LocalPlayer is not { } actor || (view != null && actor.Address != player))
         {
@@ -165,12 +187,27 @@ internal sealed unsafe class CharacterPreview : IDisposable
                 Pause("Waiting for your equipped character model.");
                 return;
             }
+            CharaViewModelData model = default;
+            model.CopyFromCharacter(source);
+            notes = "";
+            if (desired != null)
+            {
+                if (desired["Equipment"] is not JObject gear || desired["Customize"] is not JObject look
+                    || look.Value<uint>("ModelId") != 0)
+                {
+                    Stop("Select a player-character design to preview.");
+                    return;
+                }
+                notes = PreviewOutfit.Apply(ref model, gear, look, data);
+                log.Information($"Prepared selected design for preview. {notes}");
+            }
             var space = IMemorySpace.GetUISpace();
             var memory = space == null ? null : (CharaView*)space->Malloc((ulong)sizeof(CharaView), 16);
             if (memory == null) { Stop("Could not allocate the character preview."); return; }
             view = memory->Ctor();
-            view->ModelData.CopyFromCharacter(source);
+            view->ModelData = model;
             view->Initialize(null, Slot, 0);
+            loadedDesign = desired;
             player = actor.Address;
             lastImageOrStart = Environment.TickCount64;
             lastProgress = null;

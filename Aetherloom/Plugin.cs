@@ -24,7 +24,7 @@ public sealed class Plugin : IDalamudPlugin
         this.plugin = plugin;
         this.commands = commands;
         ownership = new(framework, player, client, plugin, data, log);
-        preview = new(framework, gameGui, conditions, objects, addons, log);
+        preview = new(framework, gameGui, conditions, objects, addons, log, data);
         window = new(plugin, data, ownership, preview);
         windows.AddWindow(window);
         plugin.UiBuilder.Draw += windows.Draw;
@@ -114,7 +114,7 @@ internal sealed class WardrobeWindow(IDalamudPluginInterface plugin, IDataManage
             }
             ImGui.EndCombo();
         }
-        preview.Draw();
+        preview.Draw(design);
         if (error != null) { ImGui.TextUnformatted(error); return; }
         if (ownership.Character == 0) { ImGui.TextUnformatted("Log in to check this character’s equipment."); return; }
         if (equipment == null || !ImGui.BeginTable("Equipment", 3)) return;

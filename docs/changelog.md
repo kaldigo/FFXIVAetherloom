@@ -1,1 +1,1 @@
-Choose the game default, black, or white preview backdrop. Horizontal panning follows the drag. Hold either camera button to hide and anchor the cursor until release.
+Preview a selected Glamourer design on a copy of your character. Compare its gear, accessories, dyes, hair and face paint with your current look, or switch designs while the preview is open.
