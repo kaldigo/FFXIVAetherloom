@@ -19,12 +19,12 @@ public sealed class Plugin : IDalamudPlugin
 
     public Plugin(IDalamudPluginInterface plugin, ICommandManager commands, IFramework framework,
         IPlayerState player, IClientState client, IDataManager data, IPluginLog log,
-        IPartyList party, ICondition conditions, IObjectTable objects, IAddonLifecycle addons)
+        IGameGui gameGui, ICondition conditions, IObjectTable objects, IAddonLifecycle addons)
     {
         this.plugin = plugin;
         this.commands = commands;
         ownership = new(framework, player, client, plugin, data, log);
-        preview = new(framework, party, conditions, objects, addons);
+        preview = new(framework, gameGui, conditions, objects, addons);
         window = new(plugin, data, ownership, preview);
         windows.AddWindow(window);
         plugin.UiBuilder.Draw += windows.Draw;

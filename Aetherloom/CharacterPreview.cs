@@ -23,7 +23,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
          ("FacePaint", 24, 127), ("FacePaintReversed", 24, 128), ("FacePaintColor", 25, 255)];
 
     private readonly IFramework framework;
-    private readonly IPartyList party;
+    private readonly IGameGui gameGui;
     private readonly ICondition conditions;
     private readonly IObjectTable objects;
     private readonly IAddonLifecycle addons;
@@ -36,9 +36,9 @@ internal sealed unsafe class CharacterPreview : IDisposable
     private bool cameraReady;
     private string status = "";
 
-    public CharacterPreview(IFramework framework, IPartyList party, ICondition conditions, IObjectTable objects, IAddonLifecycle addons)
+    public CharacterPreview(IFramework framework, IGameGui gameGui, ICondition conditions, IObjectTable objects, IAddonLifecycle addons)
     {
-        (this.framework, this.party, this.conditions, this.objects, this.addons) = (framework, party, conditions, objects, addons);
+        (this.framework, this.gameGui, this.conditions, this.objects, this.addons) = (framework, gameGui, conditions, objects, addons);
         framework.Update += Update;
         addons.RegisterListener(AddonEvent.PreSetup, "BannerParty", OnPartyPortraits);
     }
@@ -56,7 +56,10 @@ internal sealed unsafe class CharacterPreview : IDisposable
         if (requested == null)
         {
             if (ImGui.Button("Start embedded preview"))
+            {
+                status = "";
                 requested = design;
+            }
             if (status.Length != 0) ImGui.TextWrapped(status);
             return;
         }
@@ -65,7 +68,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
         if (ImGui.Button("Stop preview")) { Close(); return; }
         if (textureId == 0 || loaded != design)
         {
-            ImGui.TextUnformatted("Loading character preview...");
+            ImGui.TextUnformatted(status.Length == 0 ? "Loading character preview..." : status);
             return;
         }
 
@@ -81,24 +84,33 @@ internal sealed unsafe class CharacterPreview : IDisposable
     {
         var design = requested;
         if (design == null) { Release(); return; }
-        if (objects.LocalPlayer is not { } actor || party.Length != 0 || conditions[ConditionFlag.BoundByDuty]
-            || conditions[ConditionFlag.BetweenAreas] || conditions[ConditionFlag.BetweenAreas51]
-            || (portrait != null && actor.Address != player) || Environment.TickCount64 - lastDraw > 3000)
+        if (conditions[ConditionFlag.BetweenAreas] || conditions[ConditionFlag.BetweenAreas51]
+            || objects.LocalPlayer is not { } actor || (portrait != null && actor.Address != player))
         {
-            Stop("Start preview while solo outside a duty, after the area has loaded.");
+            Pause("Preview paused while the character loads.");
             return;
         }
-
+        if (!gameGui.GetAddonByName("BannerParty").IsNull)
+        {
+            Pause("Preview paused for party portraits.");
+            return;
+        }
+        if (Environment.TickCount64 - lastDraw > 3000)
+        {
+            Release();
+            return;
+        }
         if (portrait != null && !ReferenceEquals(design, loaded)) { Release(); return; }
         if (portrait == null)
         {
-            if (objects[ActorIndex] != null) { Stop("The portrait slot is in use. Close party portraits and try again."); return; }
+            if (objects[ActorIndex] != null) { Pause("Waiting for the portrait slot to become available."); return; }
             if (design["Equipment"] is not JObject gear || design["Customize"] is not JObject look
                 || look.Value<uint?>("ModelId").GetValueOrDefault() != 0)
             {
                 Stop("Select a player-character design for this preview.");
                 return;
             }
+            status = "";
             CharaViewCharacterData data = default;
             data.Ctor();
             data.ImportLocalPlayerEquipment();
@@ -172,7 +184,13 @@ internal sealed unsafe class CharacterPreview : IDisposable
 
     private void OnPartyPortraits(AddonEvent evt, AddonArgs args)
     {
-        if (requested != null || portrait != null) Stop("The game is using its party portraits.");
+        if (requested != null || portrait != null) Pause("Preview paused for party portraits.");
+    }
+
+    private void Pause(string reason)
+    {
+        status = reason;
+        Release();
     }
 
     private void Stop(string reason)

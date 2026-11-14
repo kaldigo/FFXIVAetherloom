@@ -1,1 +1,1 @@
-Start an embedded character preview in /aetherloom. Test a selected design's gear, dyes, hair and face paint with rotation and zoom while solo outside a duty.
+Use the embedded preview in parties and duties. It pauses during zoning and party portraits, then automatically resumes your selected design.
