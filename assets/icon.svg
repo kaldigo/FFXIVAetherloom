@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Aetherloom woven threads</title>
+  <defs>
+    <linearGradient id="silk">
+      <stop offset="0" stop-color="#00efbb"/>
+      <stop offset=".28" stop-color="#00e5d8"/>
+      <stop offset=".5" stop-color="#8887ff"/>
+      <stop offset=".73" stop-color="#d533ff"/>
+      <stop offset="1" stop-color="#f000ef"/>
+    </linearGradient>
+    <mask id="weave">
+      <g transform="rotate(-45 256 256)">
+        <g fill="none" stroke="white" stroke-linecap="round" stroke-width="40">
+          <path d="M182 132V380 M256 132V380 M330 132V380"/>
+          <path d="M132 182H380 M132 256H380 M132 330H380"/>
+        </g>
+        <!-- Gaps on the underpassing thread alternate at each crossing. -->
+        <path stroke="black" stroke-width="58" d="M155 182H209 M303 182H357 M229 256H283 M155 330H209 M303 330H357"/>
+        <path stroke="white" stroke-width="40" d="M153 182H211 M301 182H359 M227 256H285 M153 330H211 M301 330H359"/>
+        <path stroke="black" stroke-width="58" d="M256 155V209 M182 229V283 M330 229V283 M256 303V357"/>
+        <path stroke="white" stroke-width="40" d="M256 153V211 M182 227V285 M330 227V285 M256 301V359"/>
+      </g>
+    </mask>
+  </defs>
+  <rect width="512" height="512" fill="url(#silk)"/>
+  <rect x="10" y="10" width="492" height="492" rx="11" fill="#100f10"/>
+  <rect x="94" y="94" width="324" height="324" fill="url(#silk)" mask="url(#weave)"/>
+</svg>
