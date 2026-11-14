@@ -58,7 +58,7 @@ internal sealed class WardrobeWindow(IDalamudPluginInterface plugin, IDataManage
     {
         try
         {
-            designs = plugin.GetIpcSubscriber<Dictionary<Guid, string>>("Glamourer.GetDesignList").InvokeFunc();
+            designs = plugin.GetIpcSubscriber<Dictionary<Guid, string>>("Glamourer.GetDesignList.V2").InvokeFunc();
             if (!designs.ContainsKey(selected))
                 selected = designs.OrderBy(d => d.Value).Select(d => d.Key).FirstOrDefault();
             ReadDesign();
@@ -89,8 +89,13 @@ internal sealed class WardrobeWindow(IDalamudPluginInterface plugin, IDataManage
     public override void Draw()
     {
         if (ImGui.Button("Refresh designs")) Refresh();
-        if (error != null) { ImGui.TextUnformatted(error); return; }
-        if (designs.Count == 0) { ImGui.TextUnformatted("Create a design in Glamourer to inspect its equipment."); return; }
+        if (designs.Count == 0)
+        {
+            ImGui.TextUnformatted(error ?? "No saved designs in Glamourer. Save a design there, then refresh.");
+            return;
+        }
+        ImGui.SameLine();
+        ImGui.TextUnformatted($"{designs.Count} saved {(designs.Count == 1 ? "design" : "designs")}");
         if (ImGui.BeginCombo("Design", designs.GetValueOrDefault(selected) ?? "Select design"))
         {
             foreach (var (id, name) in designs.OrderBy(d => d.Value))
@@ -101,6 +106,7 @@ internal sealed class WardrobeWindow(IDalamudPluginInterface plugin, IDataManage
             }
             ImGui.EndCombo();
         }
+        if (error != null) { ImGui.TextUnformatted(error); return; }
         if (ownership.Character == 0) { ImGui.TextUnformatted("Log in to check this character’s equipment."); return; }
         if (equipment == null || !ImGui.BeginTable("Equipment", 3)) return;
         ImGui.TableSetupColumn("Slot");

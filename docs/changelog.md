@@ -1,1 +1,1 @@
-Aetherloom now has its own centered woven-thread icon in the plugin family colors.
+Refresh now loads saved designs from Glamourer and displays the design count. All saved designs are included regardless of tags.
