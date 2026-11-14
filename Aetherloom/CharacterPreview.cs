@@ -1,4 +1,6 @@
 using System.Numerics;
+using System.Drawing;
+using System.Runtime.InteropServices;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
@@ -27,12 +29,24 @@ internal sealed unsafe class CharacterPreview : IDisposable
     private CharaView* view;
     private OffscreenRenderingManager* backgroundOwner;
     private Texture* previousBackground;
-    private Texture* transparentBackground;
+    private Texture* installedBackground;
+    private enum Background { GameDefault, Black, White }
+    private static readonly string[] BackgroundNames = ["Game default (grey)", "Black", "White"];
+    private int background;
+    private nint dragWindow;
+    private Point dragOrigin;
+    private ImGuiMouseButton dragButton;
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out Point point);
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
     private bool requested;
     private nint player, textureId;
     private float aspect;
     private Vector2 rotate, pan;
-    private Vector4 backdrop = new(0.12f, 0.30f, 0.44f, 0f);
     private float zoomDelta;
     private long lastImageOrStart, lastDraw;
     private bool cameraReady;
@@ -49,6 +63,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
 
     public void Close()
     {
+        EndDrag();
         requested = false;
         textureId = 0;
         status = "";
@@ -82,7 +97,6 @@ internal sealed unsafe class CharacterPreview : IDisposable
         var drawList = ImGui.GetWindowDrawList();
         var min = ImGui.GetItemRectMin();
         var max = ImGui.GetItemRectMax();
-        drawList.AddRectFilled(min, max, ImGui.GetColorU32(backdrop));
         drawList.AddImage(new ImTextureID((ulong)textureId), min, max);
         var io = ImGui.GetIO();
         if (ImGui.IsItemHovered())
@@ -90,14 +104,37 @@ internal sealed unsafe class CharacterPreview : IDisposable
             ImGuiP.SetItemUsingMouseWheel();
             zoomDelta -= io.MouseWheel;
         }
-        if (ImGui.IsItemActive())
-        {
-            var delta = io.MouseDelta / io.FontGlobalScale;
-            if (ImGui.IsMouseDragging(ImGuiMouseButton.Left)) rotate += delta;
-            else if (ImGui.IsMouseDragging(ImGuiMouseButton.Right)) pan -= delta;
-        }
+        HandleCameraDrag(io.FontGlobalScale);
         ImGui.TextDisabled("Left-drag to rotate, right-drag to pan, scroll to zoom.");
-        ImGui.ColorEdit4("Preview backdrop", ref backdrop, ImGuiColorEditFlags.AlphaBar);
+        ImGui.Combo("Preview backdrop", ref background, BackgroundNames, BackgroundNames.Length);
+    }
+
+    private void HandleCameraDrag(float scale)
+    {
+        if (ImGui.IsItemActivated() && GetCursorPos(out dragOrigin))
+        {
+            dragWindow = GetForegroundWindow();
+            dragButton = ImGui.IsMouseClicked(ImGuiMouseButton.Right) ? ImGuiMouseButton.Right : ImGuiMouseButton.Left;
+        }
+        if (dragWindow == 0) return;
+        if (GetForegroundWindow() != dragWindow || !ImGui.IsItemActive() || !ImGui.IsMouseDown(dragButton))
+        {
+            EndDrag();
+            return;
+        }
+        ImGui.SetMouseCursor(ImGuiMouseCursor.None);
+        if (!GetCursorPos(out var cursor) || cursor == dragOrigin) return;
+        var delta = new Vector2(cursor.X - dragOrigin.X, cursor.Y - dragOrigin.Y) / scale;
+        if (dragButton == ImGuiMouseButton.Left) rotate += delta;
+        else pan += new Vector2(delta.X, -delta.Y);
+        SetCursorPos(dragOrigin.X, dragOrigin.Y);
+    }
+
+    private void EndDrag()
+    {
+        if (dragWindow != 0 && GetForegroundWindow() == dragWindow)
+            SetCursorPos(dragOrigin.X, dragOrigin.Y);
+        dragWindow = 0;
     }
 
     private void Update(IFramework _)
@@ -144,7 +181,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
         var stage = "Waiting for the native character renderer.";
         if (view->State == 6)
         {
-            if (backgroundOwner == null) SetTransparentBackground();
+            UpdateBackground();
             var character = view->GetCharacter();
             var hasModel = character != null && character->GetCharacterBase() != null;
             if (!cameraReady && view->Camera != null && hasModel)
@@ -192,31 +229,39 @@ internal sealed unsafe class CharacterPreview : IDisposable
         log.Information($"Preview slot {Slot}, state {view->State}, base loaded={view->CharacterLoaded}. {stage}");
     }
 
-    private void SetTransparentBackground()
+    private void UpdateBackground()
     {
+        if (background == (int)Background.GameDefault)
+        {
+            if (backgroundOwner != null) RestoreBackground();
+            return;
+        }
         var renderer = OffscreenRenderingManager.Instance();
         var utility = CharacterUtility.Instance();
-        if (renderer == null || utility == null || utility->TransparentTextureResourceHandle == null) return;
-        var texture = utility->TransparentTextureResourceHandle->Texture;
-        if (texture == null) return;
+        if (renderer == null || utility == null) return;
+        var handle = background == (int)Background.Black ? utility->BlackTextureResourceHandle : utility->WhiteTextureResourceHandle;
+        if (handle == null || handle->Texture == null) return;
+        var texture = handle->Texture;
+        if (backgroundOwner == renderer && installedBackground == texture) return;
+        RestoreBackground();
 
         // Transfer the slot's existing reference to this preview until it closes.
         texture->IncRef();
         previousBackground = renderer->BackgroundTextures[(int)Slot];
         renderer->BackgroundTextures[(int)Slot] = texture;
-        transparentBackground = texture;
+        installedBackground = texture;
         backgroundOwner = renderer;
-        log.Information($"Installed transparent renderer background for preview slot {Slot}.");
+        log.Information($"Installed {BackgroundNames[background]} renderer background for preview slot {Slot}.");
     }
 
     private void RestoreBackground()
     {
         if (backgroundOwner == null) return;
         if (OffscreenRenderingManager.Instance() == backgroundOwner
-            && backgroundOwner->BackgroundTextures[(int)Slot].Value == transparentBackground)
+            && backgroundOwner->BackgroundTextures[(int)Slot].Value == installedBackground)
         {
             backgroundOwner->BackgroundTextures[(int)Slot] = previousBackground;
-            transparentBackground->DecRef();
+            installedBackground->DecRef();
         }
         else if (previousBackground != null)
         {
@@ -224,7 +269,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
             previousBackground->DecRef();
         }
         backgroundOwner = null;
-        transparentBackground = previousBackground = null;
+        installedBackground = previousBackground = null;
     }
 
     private void OnPartyPortraits(AddonEvent evt, AddonArgs args)
@@ -249,6 +294,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
 
     private void Release()
     {
+        EndDrag();
         if (view == null) return;
         textureId = 0;
         zoomDelta = 0;

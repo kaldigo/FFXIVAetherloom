@@ -1,1 +1,1 @@
-Use the game's transparent texture as the preview slot background. Reverse both right-drag pan axes so the model follows the drag.
+Choose the game default, black, or white preview backdrop. Horizontal panning follows the drag. Hold either camera button to hide and anchor the cursor until release.
