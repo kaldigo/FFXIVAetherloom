@@ -52,7 +52,6 @@ internal sealed class WardrobeWindow(IDalamudPluginInterface plugin, IDataManage
     : Window("Aetherloom")
 {
     private Dictionary<Guid, string> designs = [];
-    private readonly JObject currentEquipment = new() { ["Equipment"] = new JObject(), ["Customize"] = new JObject() };
     private Guid selected;
     private JObject? design;
     private JObject? equipment => design?["Equipment"] as JObject;
@@ -100,11 +99,7 @@ internal sealed class WardrobeWindow(IDalamudPluginInterface plugin, IDataManage
         if (designs.Count == 0)
         {
             ImGui.TextUnformatted(error ?? "No saved designs in Glamourer. Save a design there, then refresh.");
-            if (ownership.Character != 0)
-            {
-                ImGui.TextUnformatted("Preview current equipment");
-                preview.Draw(currentEquipment);
-            }
+            preview.Draw();
             return;
         }
         ImGui.SameLine();
@@ -119,9 +114,9 @@ internal sealed class WardrobeWindow(IDalamudPluginInterface plugin, IDataManage
             }
             ImGui.EndCombo();
         }
+        preview.Draw();
         if (error != null) { ImGui.TextUnformatted(error); return; }
         if (ownership.Character == 0) { ImGui.TextUnformatted("Log in to check this character’s equipment."); return; }
-        if (design != null) preview.Draw(design);
         if (equipment == null || !ImGui.BeginTable("Equipment", 3)) return;
         ImGui.TableSetupColumn("Slot");
         ImGui.TableSetupColumn("Item");

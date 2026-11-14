@@ -7,7 +7,7 @@ using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Render;
 using FFXIVClientStructs.FFXIV.Client.System.Memory;
 using FFXIVClientStructs.FFXIV.Client.UI.Misc;
-using Newtonsoft.Json.Linq;
+using FFXIVClientStructs.FFXIV.Client.Game.Character;
 
 namespace Aetherloom;
 
@@ -16,27 +16,21 @@ internal sealed unsafe class CharacterPreview : IDisposable
     // The eighth portrait target is shared with the game's party portraits.
     private const uint Slot = 7;
     private const int ActorIndex = 440 + (int)Slot;
-    private static readonly string?[] Slots = ["MainHand", "OffHand", "Head", "Body", "Hands", null, "Legs",
-        "Feet", "Ears", "Neck", "Wrists", "RFinger", "LFinger"];
-    private static readonly (string Key, int Offset, byte Mask)[] Appearance =
-        [("Hairstyle", 6, 255), ("Highlights", 7, 128), ("HairColor", 10, 255), ("HighlightsColor", 11, 255),
-         ("FacePaint", 24, 127), ("FacePaintReversed", 24, 128), ("FacePaintColor", 25, 255)];
-
     private readonly IFramework framework;
     private readonly IGameGui gameGui;
     private readonly ICondition conditions;
     private readonly IObjectTable objects;
     private readonly IAddonLifecycle addons;
     private readonly IPluginLog log;
-    private CharaViewPortrait* portrait;
-    private JObject? requested, loaded;
+    private CharaView* view;
+    private bool requested;
     private nint player, textureId;
     private float aspect, rotate;
-    private int zoom = 60;
+    private float zoomDelta;
     private long lastImageOrStart, lastDraw;
     private bool cameraReady;
     private string status = "";
-    private (uint State, bool BaseLoaded, bool PortraitLoaded, string Stage)? lastProgress;
+    private (uint State, bool BaseLoaded, string Stage)? lastProgress;
 
     public CharacterPreview(IFramework framework, IGameGui gameGui, ICondition conditions, IObjectTable objects, IAddonLifecycle addons, IPluginLog log)
     {
@@ -48,28 +42,27 @@ internal sealed unsafe class CharacterPreview : IDisposable
 
     public void Close()
     {
-        requested = null;
+        requested = false;
         textureId = 0;
         status = "";
     }
 
-    public void Draw(JObject design)
+    public void Draw()
     {
         lastDraw = Environment.TickCount64;
-        if (requested == null)
+        if (!requested)
         {
-            if (ImGui.Button("Start embedded preview"))
+            if (ImGui.Button("Preview current gear"))
             {
                 status = "";
-                requested = design;
+                requested = true;
             }
             if (status.Length != 0) ImGui.TextWrapped(status);
             return;
         }
 
-        requested = design;
         if (ImGui.Button("Stop preview")) { Close(); return; }
-        if (textureId == 0 || loaded != design)
+        if (textureId == 0)
         {
             ImGui.TextUnformatted(status.Length == 0 ? "Loading character preview..." : status);
             return;
@@ -77,18 +70,19 @@ internal sealed unsafe class CharacterPreview : IDisposable
 
         var width = Math.Min(ImGui.GetContentRegionAvail().X, 380 * ImGui.GetIO().FontGlobalScale * aspect);
         ImGui.Image(new ImTextureID((ulong)textureId), new Vector2(width, width / aspect));
-        if (ImGui.Button("Rotate left")) rotate -= 0.25f;
+        if (ImGui.Button("Rotate left")) rotate -= 20;
         ImGui.SameLine();
-        if (ImGui.Button("Rotate right")) rotate += 0.25f;
-        ImGui.SliderInt("Zoom", ref zoom, 0, 200);
+        if (ImGui.Button("Rotate right")) rotate += 20;
+        if (ImGui.Button("Zoom in")) zoomDelta -= 1;
+        ImGui.SameLine();
+        if (ImGui.Button("Zoom out")) zoomDelta += 1;
     }
 
     private void Update(IFramework _)
     {
-        var design = requested;
-        if (design == null) { Release(); return; }
+        if (!requested) { Release(); return; }
         if (conditions[ConditionFlag.BetweenAreas] || conditions[ConditionFlag.BetweenAreas51]
-            || objects.LocalPlayer is not { } actor || (portrait != null && actor.Address != player))
+            || objects.LocalPlayer is not { } actor || (view != null && actor.Address != player))
         {
             Pause("Preview paused while the character loads.");
             return;
@@ -103,120 +97,80 @@ internal sealed unsafe class CharacterPreview : IDisposable
             Release();
             return;
         }
-        if (portrait != null && !ReferenceEquals(design, loaded)) { Release(); return; }
-        if (portrait == null)
+        if (view == null)
         {
-            if (objects[ActorIndex] != null) { Pause("Waiting for the portrait slot to become available."); return; }
-            if (design["Equipment"] is not JObject gear || design["Customize"] is not JObject look
-                || look.Value<uint?>("ModelId").GetValueOrDefault() != 0)
+            if (objects[ActorIndex] != null) { Pause("Waiting for the preview slot to become available."); return; }
+            var source = (Character*)actor.Address;
+            if (source->GetCharacterBase() == null || !source->IsReadyToDraw())
             {
-                Stop("Select a player-character design for this preview.");
+                Pause("Waiting for your equipped character model.");
                 return;
             }
-            status = "";
-            CharaViewCharacterData data = default;
-            data.Ctor();
-            data.ImportLocalPlayerEquipment();
-            ApplyAppearance(ref data, gear, look);
             var space = IMemorySpace.GetUISpace();
-            var memory = space == null ? null : (CharaViewPortrait*)space->Malloc((ulong)sizeof(CharaViewPortrait), 16);
+            var memory = space == null ? null : (CharaView*)space->Malloc((ulong)sizeof(CharaView), 16);
             if (memory == null) { Stop("Could not allocate the character preview."); return; }
-            portrait = memory->Ctor();
-            portrait->Setup(Slot, &data, null, 0, 0);
-            // Native portrait previews acknowledge the supplied character data and
-            // initialize their framing before the first render.
-            portrait->CharaViewPortraitCharacterDataCopied = true;
-            portrait->ResetCamera();
+            view = memory->Ctor();
+            view->ModelData.CopyFromCharacter(source);
+            view->Initialize(null, Slot, 0);
             player = actor.Address;
-            loaded = design;
             lastImageOrStart = Environment.TickCount64;
             lastProgress = null;
         }
 
         var native = FFXIVClientStructs.FFXIV.Client.System.Framework.Framework.Instance();
-        if (native != null) portrait->Render(native->FrameCounter);
-        var stage = "Waiting for the native portrait renderer.";
-        if (portrait->State == 6)
+        if (native != null) view->Render(native->FrameCounter);
+        var stage = "Waiting for the native character renderer.";
+        if (view->State == 6)
         {
-            var character = portrait->GetCharacter();
+            var character = view->GetCharacter();
             var hasModel = character != null && character->GetCharacterBase() != null;
-            if (!cameraReady && portrait->Camera != null && hasModel)
+            if (!cameraReady && view->Camera != null && hasModel)
             {
-                portrait->ToggleCharacterVisibility(true);
-                portrait->ResetCamera();
-                portrait->SetCameraZoom((byte)zoom);
-                portrait->SetAmbientLightingColor(255, 255, 255);
-                portrait->SetAmbientLightingBrightness(70);
-                portrait->SetDirectionalLightingColor(255, 255, 255);
-                portrait->SetDirectionalLightingBrightness(80);
+                view->ResetPositions();
                 cameraReady = true;
             }
-            if (cameraReady && rotate != 0) portrait->SetCameraYawAndPitch(rotate, 0);
+            if (cameraReady && rotate != 0) view->SetCameraYawAndPitch(rotate, 0);
             rotate = 0;
-            if (cameraReady && portrait->CameraZoom != zoom) portrait->SetCameraZoom((byte)zoom);
+            if (cameraReady && zoomDelta != 0) view->SetCameraDistance(zoomDelta);
+            zoomDelta = 0;
             var targets = RenderTargetManager.Instance();
             var texture = targets == null ? null : targets->GetCharaViewTexture(Slot);
-            if (cameraReady && hasModel && portrait->CharaViewPortraitCharacterLoaded
+            if (cameraReady && hasModel && character->IsReadyToDraw()
                 && texture != null && texture->D3D11ShaderResourceView != null && texture->ActualWidth > 0 && texture->ActualHeight > 0)
             {
                 aspect = (float)texture->ActualWidth / texture->ActualHeight;
                 textureId = (nint)texture->D3D11ShaderResourceView;
-                ReportProgress("Displaying portrait texture.");
+                ReportProgress("Displaying character texture.");
                 lastImageOrStart = Environment.TickCount64;
                 return;
             }
-            stage = character == null ? "Waiting for the portrait character."
+            stage = character == null ? "Waiting for the preview actor."
                 : !hasModel ? "Waiting for the character model."
-                : portrait->Camera == null ? "Waiting for the portrait camera."
-                : !portrait->CharaViewPortraitCharacterLoaded ? $"Waiting for the portrait to show the model (render flags {character->RenderFlags})."
+                : view->Camera == null ? "Waiting for the preview camera."
+                : !character->IsReadyToDraw() ? $"Waiting for the preview actor to draw (render flags {character->RenderFlags})."
                 : targets == null ? "Waiting for the render target manager."
-                : texture == null ? "Waiting for the portrait texture."
-                : texture->D3D11ShaderResourceView == null ? "Waiting for the portrait texture's shader view."
-                : "Waiting for nonzero portrait texture dimensions.";
+                : texture == null ? "Waiting for the character texture."
+                : texture->D3D11ShaderResourceView == null ? "Waiting for the character texture's shader view."
+                : "Waiting for nonzero character texture dimensions.";
         }
         textureId = 0;
         ReportProgress(stage);
         if (Environment.TickCount64 - lastImageOrStart > 15000)
-            Stop($"Preview timed out at state {portrait->State}. {stage}");
+            Stop($"Preview timed out at state {view->State}. {stage}");
     }
 
     private void ReportProgress(string stage)
     {
-        var progress = (portrait->State, portrait->CharacterLoaded, portrait->CharaViewPortraitCharacterLoaded, stage);
+        var progress = (view->State, view->CharacterLoaded, stage);
         if (lastProgress == progress) return;
         lastProgress = progress;
         status = stage;
-        log.Information($"Preview slot {Slot}, state {portrait->State}, base loaded={portrait->CharacterLoaded}, portrait loaded={portrait->CharaViewPortraitCharacterLoaded}. {stage}");
-    }
-
-    private static void ApplyAppearance(ref CharaViewCharacterData data, JObject gear, JObject look)
-    {
-        for (var i = 0; i < Slots.Length; i++)
-        {
-            if (Slots[i] is not { } slot || gear[slot] is not JObject item) continue;
-            if (item.Value<bool>("Apply") && item.Value<ulong?>("ItemId") is { } id)
-                data.ItemIds[i] = id < 1_000_000 ? (uint)id : 0;
-            if (item.Value<bool>("ApplyStain"))
-            {
-                data.ItemStain0Ids[i] = item.Value<byte>("Stain");
-                data.ItemStain1Ids[i] = item.Value<byte>("Stain2");
-            }
-        }
-
-        var bytes = data.CustomizeData.Data;
-        foreach (var (key, offset, mask) in Appearance)
-        {
-            if (look[key] is not JObject field || !field.Value<bool>("Apply")) continue;
-            // A style made for a different clan, sex or face may have no model for this player.
-            if (key == "Hairstyle" && (look["Clan"]?.Value<byte>("Value") != bytes[4]
-                || look["Gender"]?.Value<byte>("Value") != bytes[1] || look["Face"]?.Value<byte>("Value") != bytes[5])) continue;
-            bytes[offset] = (byte)((bytes[offset] & ~mask) | (field.Value<byte>("Value") & mask));
-        }
+        log.Information($"Preview slot {Slot}, state {view->State}, base loaded={view->CharacterLoaded}. {stage}");
     }
 
     private void OnPartyPortraits(AddonEvent evt, AddonArgs args)
     {
-        if (requested != null || portrait != null) Pause("Preview paused for party portraits.");
+        if (requested || view != null) Pause("Preview paused for party portraits.");
     }
 
     private void Pause(string reason)
@@ -236,14 +190,14 @@ internal sealed unsafe class CharacterPreview : IDisposable
 
     private void Release()
     {
-        if (portrait == null) return;
+        if (view == null) return;
         textureId = 0;
-        loaded = null;
+        zoomDelta = 0;
         rotate = 0;
         cameraReady = false;
-        portrait->Release();
-        portrait->Dtor(1);
-        portrait = null;
+        view->Release();
+        view->Dtor(1);
+        view = null;
     }
 
     public void Dispose()
@@ -251,6 +205,6 @@ internal sealed unsafe class CharacterPreview : IDisposable
         framework.Update -= Update;
         addons.UnregisterListener(AddonEvent.PreSetup, "BannerParty", OnPartyPortraits);
         Close();
-        if (portrait != null) framework.RunOnFrameworkThread(Release).GetAwaiter().GetResult();
+        if (view != null) framework.RunOnFrameworkThread(Release).GetAwaiter().GetResult();
     }
 }

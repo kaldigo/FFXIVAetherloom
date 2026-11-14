@@ -1,1 +1,1 @@
-Initialize the embedded portrait camera with the supplied character data and show the preview once the character model is ready. If loading stalls, the preview and Dalamud log now identify whether the actor, model, camera, or texture is still pending.
+Test the embedded character view with your current gear. Use the rotation and zoom controls in Aetherloom, including in duties.
