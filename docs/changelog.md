@@ -1,1 +1,1 @@
-Use the embedded preview in parties and duties. It pauses during zoning and party portraits, then automatically resumes your selected design.
+Check the portrait texture as soon as the native renderer is ready. Preview messages and the Dalamud log now identify the stage of a timeout.

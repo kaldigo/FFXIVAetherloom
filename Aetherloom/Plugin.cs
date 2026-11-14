@@ -24,7 +24,7 @@ public sealed class Plugin : IDalamudPlugin
         this.plugin = plugin;
         this.commands = commands;
         ownership = new(framework, player, client, plugin, data, log);
-        preview = new(framework, gameGui, conditions, objects, addons);
+        preview = new(framework, gameGui, conditions, objects, addons, log);
         window = new(plugin, data, ownership, preview);
         windows.AddWindow(window);
         plugin.UiBuilder.Draw += windows.Draw;

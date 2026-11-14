@@ -27,18 +27,21 @@ internal sealed unsafe class CharacterPreview : IDisposable
     private readonly ICondition conditions;
     private readonly IObjectTable objects;
     private readonly IAddonLifecycle addons;
+    private readonly IPluginLog log;
     private CharaViewPortrait* portrait;
     private JObject? requested, loaded;
     private nint player, textureId;
     private float aspect, rotate;
     private int zoom = 60;
-    private long started, lastDraw;
+    private long lastImageOrStart, lastDraw;
     private bool cameraReady;
     private string status = "";
+    private (uint State, bool BaseLoaded, bool PortraitLoaded, string Stage)? lastProgress;
 
-    public CharacterPreview(IFramework framework, IGameGui gameGui, ICondition conditions, IObjectTable objects, IAddonLifecycle addons)
+    public CharacterPreview(IFramework framework, IGameGui gameGui, ICondition conditions, IObjectTable objects, IAddonLifecycle addons, IPluginLog log)
     {
         (this.framework, this.gameGui, this.conditions, this.objects, this.addons) = (framework, gameGui, conditions, objects, addons);
+        this.log = log;
         framework.Update += Update;
         addons.RegisterListener(AddonEvent.PreSetup, "BannerParty", OnPartyPortraits);
     }
@@ -123,14 +126,16 @@ internal sealed unsafe class CharacterPreview : IDisposable
             portrait->ToggleCharacterVisibility(true);
             player = actor.Address;
             loaded = design;
-            started = Environment.TickCount64;
+            lastImageOrStart = Environment.TickCount64;
+            lastProgress = null;
         }
 
         var native = FFXIVClientStructs.FFXIV.Client.System.Framework.Framework.Instance();
         if (native != null) portrait->Render(native->FrameCounter);
-        if (portrait->State == 6 && portrait->CharacterLoaded)
+        var stage = "Waiting for the native portrait renderer.";
+        if (portrait->State == 6)
         {
-            if (!cameraReady)
+            if (!cameraReady && portrait->Camera != null)
             {
                 portrait->ResetCamera();
                 portrait->SetCameraZoom((byte)zoom);
@@ -140,21 +145,37 @@ internal sealed unsafe class CharacterPreview : IDisposable
                 portrait->SetDirectionalLightingBrightness(80);
                 cameraReady = true;
             }
-            if (rotate != 0) portrait->SetCameraYawAndPitch(rotate, 0);
+            if (cameraReady && rotate != 0) portrait->SetCameraYawAndPitch(rotate, 0);
             rotate = 0;
-            if (portrait->CameraZoom != zoom) portrait->SetCameraZoom((byte)zoom);
+            if (cameraReady && portrait->CameraZoom != zoom) portrait->SetCameraZoom((byte)zoom);
             var targets = RenderTargetManager.Instance();
             var texture = targets == null ? null : targets->GetCharaViewTexture(Slot);
             if (texture != null && texture->D3D11ShaderResourceView != null && texture->ActualWidth > 0 && texture->ActualHeight > 0)
             {
                 aspect = (float)texture->ActualWidth / texture->ActualHeight;
                 textureId = (nint)texture->D3D11ShaderResourceView;
+                ReportProgress("Displaying portrait texture.");
+                lastImageOrStart = Environment.TickCount64;
                 return;
             }
+            stage = targets == null ? "Waiting for the render target manager."
+                : texture == null ? "Waiting for the portrait texture."
+                : texture->D3D11ShaderResourceView == null ? "Waiting for the portrait texture's shader view."
+                : "Waiting for nonzero portrait texture dimensions.";
         }
         textureId = 0;
-        if (Environment.TickCount64 - started > 15000)
-            Stop($"The preview did not produce an image (portrait state {portrait->State}).");
+        ReportProgress(stage);
+        if (Environment.TickCount64 - lastImageOrStart > 15000)
+            Stop($"Preview timed out at state {portrait->State}. {stage}");
+    }
+
+    private void ReportProgress(string stage)
+    {
+        var progress = (portrait->State, portrait->CharacterLoaded, portrait->CharaViewPortraitCharacterLoaded, stage);
+        if (lastProgress == progress) return;
+        lastProgress = progress;
+        status = stage;
+        log.Information($"Preview slot {Slot}, state {portrait->State}, base loaded={portrait->CharacterLoaded}, portrait loaded={portrait->CharaViewPortraitCharacterLoaded}. {stage}");
     }
 
     private static void ApplyAppearance(ref CharaViewCharacterData data, JObject gear, JObject look)
@@ -189,12 +210,14 @@ internal sealed unsafe class CharacterPreview : IDisposable
 
     private void Pause(string reason)
     {
+        if (status != reason) log.Information(reason);
         status = reason;
         Release();
     }
 
     private void Stop(string reason)
     {
+        log.Warning(reason);
         Close();
         status = reason;
         Release();
