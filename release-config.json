@@ -1,0 +1,13 @@
+{
+  "internal_name": "Aetherloom",
+  "repository": "kaldigo/FFXIVAetherloom",
+  "minimum_version": "0.1.0.0",
+  "project": "Aetherloom/Aetherloom.csproj",
+  "build": "Aetherloom/bin/Release",
+  "required_dlls": [
+    "Aetherloom.dll"
+  ],
+  "licenses": {
+    "LICENSE": "LICENSE"
+  }
+}
