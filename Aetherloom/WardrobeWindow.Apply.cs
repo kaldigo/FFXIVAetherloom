@@ -13,26 +13,17 @@ internal sealed partial class WardrobeWindow
 
     public void ApplyToCharacter()
     {
-        ApplyDesignToCharacter(Selected,out var result);
+        if(ApplyDesignToCharacter(Selected,out var result,true))AssignmentMode=false;
         Message=result;
     }
 
-    internal WardrobeAssignment? GetAssignment(uint job,uint zone)
-    {
-        var character=ownership.Character;
-        if(character==0 || assignments[character.ToString()] is not JObject bindings
-            || (bindings["Jobs"]?[job.ToString()]==null && bindings["Zones"]?[zone.ToString()]==null))return null;
-        if(Environment.TickCount64>=nextRefresh)Refresh();
-        return disconnected ? null : WardrobeAssignment.Resolve(bindings,character,job,zone,library.ContainsKey);
-    }
-
-    internal bool ApplyDesignToCharacter(Guid id,out string result)
+    internal bool ApplyDesignToCharacter(Guid id,out string result,bool manual=false)
     {
         result="Your character is unavailable.";
-        if(id==Guid.Empty || objects.LocalPlayer is not {} player || !HasCharacter)return false;
+        if(objects.LocalPlayer is not {} player || !HasCharacter)return false;
         try
         {
-            var plan=Plans[id.ToString()] as JObject
+            var plan=id==Guid.Empty ? new JObject{["Equipment"]=new JObject(),["Customize"]=new JObject()} : Plans[id.ToString()] as JObject
                 ?? plugin.GetIpcSubscriber<Guid,JObject?>("Glamourer.GetDesignJObject").InvokeFunc(id);
             if(plan?["Equipment"] is not JObject equipment || plan["Customize"] is not JObject)
             {
@@ -57,6 +48,10 @@ internal sealed partial class WardrobeWindow
             var skipped=new List<string>();
             var payload=WardrobeApplication.BuildPlan(currentGear,currentLook,plan,Gear.Concat(Accessories),
                 Fields("Hair").Concat(Fields("Face paint")),main,CanApplyItem,skipped,out bool applyLook);
+            var previous=CharacterSettings["AppliedFields"] as JObject??new JObject();
+            if(!WardrobeApplication.PlanRestoration(previous,payload,currentGear,currentLook,manual,Equipped,Fields("Hair").Concat(Fields("Face paint")),out var next,out var restoreLook))
+            {result="Waiting for equipped gear.";return false;}
+            applyLook|=restoreLook;
             // Once + Equipment, plus Customization when a wardrobe appearance field is enabled.
             var response=plugin.GetIpcSubscriber<object,int,uint,ulong,int>("Glamourer.ApplyState")
                 .InvokeFunc(payload,player.ObjectIndex,0,applyLook?7UL:3UL);
@@ -65,6 +60,7 @@ internal sealed partial class WardrobeWindow
                 result=$"Glamourer could not apply the design (code {response}).";
                 return false;
             }
+            if(!JToken.DeepEquals(previous,next)){CharacterSettings["AppliedFields"]=next;Write();}
             result=skipped.Count==0?"Design applied.":"Skipped for ownership: "+string.Join(", ",skipped.Select(key=>Labels.GetValueOrDefault(key,key)))+".";
             return true;
         }

@@ -88,3 +88,31 @@ if(WardrobeWearability.Allows(Mask(),8,1))throw new Exception("An incompatible a
 wearablePlan.Remove("AdditionalMainHands");
 if(!WardrobeWearability.Allows(Mask(),1,0))throw new Exception("Compatible restricted gear must remain available.");
 Console.WriteLine("Wardrobe wearability checks passed.");
+
+var chainRules=new JObject();
+string[] coast=["region:22","any"], limsa=["city:500",..coast], inn=["territory:177","inn",..limsa];
+string[] warrior=["job:21","role:0","any"], paladin=["job:19","role:0","any"];
+Guid regional=Guid.NewGuid(), cityTank=Guid.NewGuid(),cityWar=Guid.NewGuid(),innOwner=Guid.NewGuid();
+void Demand(bool value,string why){if(!value)throw new Exception(why);}
+bool Visible(Guid _)=>true;
+Demand(WardrobeAssignment.Edit(chainRules,"region:22|job:21",regional,null,false),"Create region rule");
+Demand(WardrobeAssignment.Winner(chainRules,inn,warrior,Visible)?.Design==regional,"Inn inherits region without entry history");
+Demand(WardrobeAssignment.Previous(chainRules,limsa,warrior,"job:21",Visible)?.Design==regional,"Editor reports the next regional Warrior rule");
+WardrobeAssignment.Edit(chainRules,"city:500|role:0",cityTank,null,false);
+WardrobeAssignment.Edit(chainRules,"city:500|job:21",cityWar,null,false);
+Demand(WardrobeAssignment.Winner(chainRules,inn,warrior,Visible)?.Design==cityWar && WardrobeAssignment.Winner(chainRules,inn,paladin,Visible)?.Design==cityTank,"City/job specificity inside inn");
+Demand(WardrobeAssignment.Previous(chainRules,inn,warrior,"any",Visible)?.Design==cityWar,"Inn generic overrides city specific");
+WardrobeAssignment.Edit(chainRules,"inn|any",innOwner,null,false);
+Demand(WardrobeAssignment.Winner(chainRules,inn,warrior,Visible)?.Design==innOwner,"Inn rule wins");
+Demand(!WardrobeAssignment.Edit(chainRules,"inn|any",cityTank,null,false) && !WardrobeAssignment.Edit(chainRules,"inn|any",cityTank,cityWar,false),"Duplicate or stale move rejected");
+Demand(WardrobeAssignment.Edit(chainRules,"inn|any",cityTank,innOwner,false) && chainRules.Count==4,"Confirmed move replaces one owner");
+var aliases=JObject.Parse("""{"Jobs":{"021":"invalid","21":"00000000-0000-0000-0000-000000000001","0021":"00000000-0000-0000-0000-000000000002","bad":{}}}""");
+Demand(WardrobeAssignment.Rules(aliases).Count==1 && WardrobeAssignment.Rules(aliases).Count==1,"Malformed and duplicate legacy conditions migrate idempotently");
+var activeFields=JObject.Parse("""{"Body":3,"Head":3,"Hairstyle":{"Before":2,"Applied":5},"FacePaint":{"Before":4,"Applied":8}}""");
+var visibleLook=JObject.Parse("""{"Hairstyle":{"Value":5},"FacePaint":{"Value":9},"Race":{"Value":8}}""");
+var transition=JObject.Parse("""{"Equipment":{"Body":{"Apply":true,"ApplyStain":true,"ItemId":30}},"Customize":{}}""");
+JObject RealGear(int index)=>new(){["ItemId"]=100+index,["Stain"]=2,["Stain2"]=4};
+Demand(WardrobeApplication.PlanRestoration(activeFields,transition,new(),visibleLook,false,RealGear,["Hairstyle","FacePaint"],out var remaining,out var lookChanged),"Restore on fallback");
+Demand(lookChanged && (int?)transition["Customize"]?["Hairstyle"]?["Value"]==2 && transition["Customize"]?["FacePaint"]==null && transition["Customize"]?["Race"]==null,"Restore unchanged managed hair, preserve external face paint and race");
+Demand((int?)transition["Equipment"]?["Head"]?["ItemId"]==102 && (int?)transition["Equipment"]?["Head"]?["Stain2"]==4 && (int?)remaining["Body"]==3 && remaining.Count==1,"Released slot reads actual equipped gear and dyes");
+Console.WriteLine("Assignment chain, conflicts, migration and restoration checks passed.");

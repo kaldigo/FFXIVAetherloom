@@ -51,7 +51,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     public WardrobeWindow(IDalamudPluginInterface plugin,IDataManager data,WardrobeOwnership ownership,CharacterPreview preview,ITextureProvider textures,IObjectTable objects)
         :base("Aetherloom",WindowShell.HostFlags)
     {
-        this.plugin=plugin;this.data=data;this.ownership=ownership;this.preview=preview;this.textures=textures;this.objects=objects;
+        locations=new(data);this.plugin=plugin;this.data=data;this.ownership=ownership;this.preview=preview;this.textures=textures;this.objects=objects;
         Size=new Vector2(1180,730);SizeCondition=ImGuiCond.FirstUseEver;
         SizeConstraints=new WindowSizeConstraints{MinimumSize=new(1000,500),MaximumSize=new(float.MaxValue)};
         file=Path.Combine(plugin.GetPluginConfigDirectory(),"wardrobe-plans.json");
@@ -84,15 +84,15 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
             if(disconnected){disconnected=false;Message="";}
             if(snapshot==lastSnapshot)return;
             var root=JObject.Parse(snapshot);
-            var entries=root["Designs"]!.ToObject<LibraryDesign[]>()!;
+            var entries=root["Designs"]!.ToObject<LibraryDesign[]>()!.DistinctBy(d=>d.Id).ToArray();
             var byId=entries.ToDictionary(x=>x.Id);
             if(Migrate(byId))
             {
                 snapshot=plugin.GetIpcSubscriber<string>(Api+"DesignLibrary").InvokeFunc();
-                root=JObject.Parse(snapshot);entries=root["Designs"]!.ToObject<LibraryDesign[]>()!;
+                root=JObject.Parse(snapshot);entries=root["Designs"]!.ToObject<LibraryDesign[]>()!.DistinctBy(d=>d.Id).ToArray();
             }
             KnownTags=entries.SelectMany(d=>d.Tags).Where(WardrobeLibrary.VisibleTag).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
-            weaponJobTerms.Clear();
+            ruleNotes.Clear();weaponJobTerms.Clear();
             wearableGear.Clear();
             var previous=library.GetValueOrDefault(Selected);
             library=entries.Where(d=>WardrobeLibrary.Tagged(d.Tags,WardrobeLibrary.Tag)).ToDictionary(d=>d.Id);
@@ -171,7 +171,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     }
     private void Write()
     {
-        referenceSnapshot=null;
+        ruleNotes.Clear();referenceSnapshot=null;
         saved["Plans"]=Plans;saved["Assignments"]=assignments;
         try{Directory.CreateDirectory(Path.GetDirectoryName(file)!);File.WriteAllText(file+".tmp",saved.ToString());File.Move(file+".tmp",file,true);Message="";}
         catch(IOException){Message="Could not save the wardrobe edit to disk.";}
@@ -252,7 +252,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         Plans.Remove(id.ToString());assignedJobTerms=null;
         foreach(var character in assignments.Properties().Select(p=>p.Value).OfType<JObject>())
             foreach(var type in character.Properties().Select(p=>p.Value).OfType<JObject>())
-                foreach(var binding in type.Properties().Where(p=>Guid.TryParse((string?)p.Value,out var owner) && owner==id).ToArray())
+                foreach(var binding in type.Properties().Where(p=>p.Value is JValue v && Guid.TryParse(v.ToString(),out var owner) && owner==id).ToArray())
                     binding.Remove();
         Write();Refresh();return true;
     }
@@ -336,9 +336,10 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
             searchCharacter=ownership.Character;assignedJobTerms=[];
             var jobs=data.GetExcelSheet<ClassJob>(Dalamud.Game.ClientLanguage.English);
             var local=data.GetExcelSheet<ClassJob>();
-            foreach(var assignment in Bindings("Jobs").Properties())
+            foreach(var assignment in Rules.Properties())
             {
-                if(!Guid.TryParse((string?)assignment.Value,out var owner) || !uint.TryParse(assignment.Name,out var jobId)
+                var condition=assignment.Name.Split('|').Last();
+                if(assignment.Value is not JValue raw || !Guid.TryParse(raw.ToString(),out var owner) || !condition.StartsWith("job:") || !uint.TryParse(condition.AsSpan(4),out var jobId)
                     || !jobs.TryGetRow(jobId,out var job))continue;
                 if(!assignedJobTerms.TryGetValue(owner,out var labels))assignedJobTerms[owner]=labels=[];
                 labels.Add(job.Name.ExtractText());labels.Add(job.Abbreviation.ExtractText());
@@ -455,32 +456,6 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     }
     public void SetStyle(string key,byte value){Look[key]=new JObject{["Value"]=value,["Apply"]=true};Save();}
     public bool HasCharacter=>ownership.Character!=0;
-    private JObject Bindings(string type)
-    {
-        var character=(JObject)(assignments[ownership.Character.ToString()]??=new JObject());
-        return (JObject)(character[type]??=new JObject());
-    }
-    private readonly Dictionary<string,(uint,string)[]> assignmentOptions=[];
-    public IEnumerable<(uint Id,string Name)> AssignmentOptions(string type)
-    {
-        if(assignmentOptions.TryGetValue(type,out var values))return values;
-        var list=type=="Jobs"?data.GetExcelSheet<ClassJob>().Where(j=>j.RowId>0).Select(j=>(j.RowId,j.Name.ExtractText()+" ("+j.Abbreviation.ExtractText()+")")):
-            data.GetExcelSheet<TerritoryType>().Where(t=>t.PlaceName.RowId!=0).Select(t=>(t.RowId,t.PlaceName.Value.Name.ExtractText()));
-        return assignmentOptions[type]=list.GroupBy(x=>x.Item2).SelectMany(g=>g.Select(option=>
-            (option.RowId,g.Count()>1?$"{option.Item2} (#{option.RowId})":option.Item2))).OrderBy(x=>x.Item2).ToArray();
-    }
-    public string? AssignmentOwner(string type,uint id)
-    {
-        if(!Guid.TryParse((string?)Bindings(type)[id.ToString()],out var owner))return null;
-        return library.GetValueOrDefault(owner)?.Name??"Another design";
-    }
-    public IReadOnlyCollection<uint> Assigned(string type)=>Bindings(type).Properties().Where(p=>(string?)p.Value==Selected.ToString()).Select(p=>uint.Parse(p.Name)).ToArray();
-    public void Assign(string type,uint id,bool enabled)
-    {
-        if(!HasCharacter)return;
-        if(type=="Jobs")assignedJobTerms=null;
-        if(enabled)Bindings(type)[id.ToString()]=Selected.ToString();else Bindings(type).Remove(id.ToString()); Write();
-    }
     public ISet<byte> FavoriteDyes{get;}=new HashSet<byte>();
     public void ToggleFavorite(byte id){if(!FavoriteDyes.Remove(id))FavoriteDyes.Add(id);saved["FavoriteDyes"]=new JArray(FavoriteDyes);Write();}
     public bool? DisplayOption(string key)

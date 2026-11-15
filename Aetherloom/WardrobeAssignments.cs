@@ -15,6 +15,7 @@ internal sealed class WardrobeAssignments : IDisposable
     private readonly IDalamudPluginInterface plugin;
     private WardrobeAssignment? observed, applied;
     private long nextCheck;
+    private int modeRevision;
     private nint finalizedActor;
     private string? lastError;
 
@@ -45,9 +46,11 @@ internal sealed class WardrobeAssignments : IDisposable
         {
             var actor=objects.LocalPlayer;
             var finalized=Interlocked.Exchange(ref finalizedActor,0);
-            var target=actor==null || condition[ConditionFlag.BetweenAreas] || condition[ConditionFlag.BetweenAreas51]
-                ? null : window.GetAssignment(actor.ClassJob.RowId,client.TerritoryType);
-            if(target!=observed || (target!=null && finalized!=0 && finalized==actor?.Address))
+            if(modeRevision!=window.ModeRevision){observed=applied=null;modeRevision=window.ModeRevision;}
+            if(actor==null || condition[ConditionFlag.BetweenAreas] || condition[ConditionFlag.BetweenAreas51]
+                || !window.TryAssignment(actor.ClassJob.RowId,client.TerritoryType,client.MapId,out var target))
+            {observed=applied=null;return;}
+            if(target!=observed || (finalized!=0 && finalized==actor?.Address))
             {
                 // Let the new actor/gearset settle, then resolve again before applying.
                 observed=target;
@@ -55,7 +58,9 @@ internal sealed class WardrobeAssignments : IDisposable
                 lastError=null;
                 return;
             }
-            if(target is not {} assignment || applied==target)return;
+            if(applied==target)return;
+            var assignment=target;
+            if(target.Design==Guid.Empty && !window.HasAppliedFields){applied=target;return;}
             if(window.ApplyDesignToCharacter(assignment.Design,out var result))
             {
                 applied=assignment;

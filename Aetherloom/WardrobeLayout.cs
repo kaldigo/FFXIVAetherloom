@@ -72,10 +72,13 @@ internal interface IWardrobe
     void SetStyle(string key,byte id);
     bool GroupEnabled(string group);
     void SetGroupEnabled(string group,bool enabled);
-    IEnumerable<(uint Id,string Name)> AssignmentOptions(string type);
-    string? AssignmentOwner(string type,uint id);
-    IReadOnlyCollection<uint> Assigned(string type);
-    void Assign(string type,uint id,bool enabled);
+    bool AssignmentMode {get;set;}
+    IEnumerable<(string Key,string Name)> RuleOptions(string type);
+    IEnumerable<string> DesignRules {get;}
+    string RuleLabel(string key);
+    Guid? RuleOwner(string key);
+    string RuleNote(string key);
+    void SaveRule(string key,Guid? expected,bool remove);
     bool HasCharacter {get;}
     bool BypassOwnership {get;set;}
     void ApplyToCharacter();
@@ -226,6 +229,12 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
             WorkspaceControls.EndPicker();
         }
         var matching=SearchAndFilters();
+        var automatic=wardrobe.AssignmentMode;
+        ImGui.AlignTextToFramePadding();ImGui.TextUnformatted("Manual");ImGui.SameLine();
+        var mode=Controls.Switch("wardrobe-mode",automatic);
+        if(mode!=automatic)wardrobe.AssignmentMode=mode;
+        if(ImGui.IsItemHovered())ImGui.SetTooltip("Switch wardrobe mode for all characters.");
+        ImGui.SameLine();ImGui.TextUnformatted("Assignments");
         bool filtering=!string.IsNullOrWhiteSpace(filter) || FilterCount>0;
         ImGui.Spacing();ImGui.Separator();
         ImGui.PushStyleVar(ImGuiStyleVar.ScrollbarSize,8*S);
@@ -421,29 +430,35 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         ImGui.Spacing();
         if(ImGui.BeginTabBar("wardrobe-tabs"))
         {
-            foreach(var tab in Tabs)
+            try
             {
-                if(!ImGui.BeginTabItem(tab, startupTab==tab?ImGuiTabItemFlags.SetSelected:0)) continue;
-                Tab=tab;
-                ImGui.Spacing();
-                if(tab=="Appearance")
+                foreach(var tab in Tabs)
                 {
-                    GroupSwitch("Hair");
-                    StyleRow("Hairstyle","Hairstyle");
-                    AppearanceColor("HairColor","Hair color");
-                    Toggle("Highlights","Highlights"); AppearanceColor("HighlightsColor","Highlight color");
-                    ImGui.Spacing(); ImGui.Separator(); ImGui.Spacing();
-                    GroupSwitch("Face paint");
-                    StyleRow("FacePaint","Pattern"); AppearanceColor("FacePaintColor","Paint color");
-                    Toggle("FacePaintReversed","Mirror");
+                    if(!ImGui.BeginTabItem(tab, startupTab==tab?ImGuiTabItemFlags.SetSelected:0)) continue;
+                    try
+                    {
+                        Tab=tab;
+                        ImGui.Spacing();
+                        if(tab=="Appearance")
+                        {
+                            GroupSwitch("Hair");
+                            StyleRow("Hairstyle","Hairstyle");
+                            AppearanceColor("HairColor","Hair color");
+                            Toggle("Highlights","Highlights"); AppearanceColor("HighlightsColor","Highlight color");
+                            ImGui.Spacing(); ImGui.Separator(); ImGui.Spacing();
+                            GroupSwitch("Face paint");
+                            StyleRow("FacePaint","Pattern"); AppearanceColor("FacePaintColor","Paint color");
+                            Toggle("FacePaintReversed","Mirror");
+                        }
+                        else if(tab=="Details") DrawDetails();
+                        else if(tab=="Assignments") DrawAssignments();
+                        else DrawEquipment(tab=="Accessories");
+                    }
+                    finally { ImGui.EndTabItem(); }
                 }
-                else if(tab=="Details") DrawDetails();
-                else if(tab=="Assignments") DrawAssignments();
-                else DrawEquipment(tab=="Accessories");
-                ImGui.EndTabItem();
+                startupTab=null;
             }
-            startupTab=null;
-            ImGui.EndTabBar();
+            finally { ImGui.EndTabBar(); }
         }
         if(Tab is "Gear" or "Accessories" or "Appearance")
         {
@@ -555,63 +570,100 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         ImGui.Separator();if(ImGui.Button("Remove dye")){wardrobe.SetDye(slot.Key,channel,0);ImGui.CloseCurrentPopup();}
         WorkspaceControls.EndPicker();
     }
+    private string locationType="Anywhere", rulePlace="any", ruleJob="any";
+    private readonly HashSet<string> extraPlaces=[], extraJobs=[];
+    private (Guid Design,string Key,Guid Owner)? moveRequest;
     private void DrawAssignments()
     {
-        if(!wardrobe.HasCharacter){ImGui.TextWrapped("Log in to manage character assignments.");return;}
-        foreach(var type in new[]{"Jobs","Zones"})
+        if(!wardrobe.HasCharacter){ImGui.TextUnformatted("Log in to manage assignments.");return;}
+        foreach(var key in wardrobe.DesignRules.ToArray())
         {
-            ImGui.PushID(type);
-            bool jobs=type=="Jobs";
-            var options=wardrobe.AssignmentOptions(type);
-            var assigned=wardrobe.Assigned(type);
-            float right=ImGui.GetCursorPosX()+ImGui.GetContentRegionAvail().X;
-            ImGui.AlignTextToFramePadding();ImGui.TextUnformatted(type);ImGui.SameLine();
-            string edit=jobs?"Choose jobs":"Choose zones";
-            ImGui.SetCursorPosX(right-ImGui.CalcTextSize(edit).X-2*ImGui.GetStyle().FramePadding.X);
-            if(ImGui.Button(edit)){assignmentSearch="";ImGui.OpenPopup("choices");}
-            AutoOpen(type,"choices");
-            if(WorkspaceControls.BeginPicker("choices",328,360))
+            ImGui.PushID(key);ImGui.AlignTextToFramePadding();ImGui.TextUnformatted(wardrobe.RuleLabel(key));ImGui.SameLine();
+            if(WorkspaceControls.CloseButton("remove",22*S,"Remove assignment"))wardrobe.SaveRule(key,wardrobe.Selected,true);
+            ImGui.PopID();
+        }
+        ImGui.Spacing();
+        var previousType=locationType;
+        Select("Location type",ref locationType,new[]{"Anywhere","Region","City or zone","Named area","Inn","Housing"}.Select(t=>(t,t)));
+        if(previousType!=locationType){rulePlace=locationType=="Anywhere"?"any":"";extraPlaces.Clear();}
+        if(locationType!="Anywhere")Select("Location",ref rulePlace,wardrobe.RuleOptions(locationType),extraPlaces);
+        Select("Job or role",ref ruleJob,wardrobe.RuleOptions("Job"),extraJobs);
+        if(rulePlace.Length==0 || ruleJob.Length==0)return;
+        var places=extraPlaces.Prepend(rulePlace).Distinct().ToArray();
+        var jobs=extraJobs.Prepend(ruleJob).Distinct().ToArray();
+        bool multiple=places.Length*jobs.Length>1;
+        foreach(var place in places)
+        foreach(var job in jobs)
+        {
+            string condition=place+"|"+job;
+            ImGui.PushID(condition);
+            try { DrawCondition(condition,multiple); }
+            finally { ImGui.PopID(); }
+        }
+
+        void DrawCondition(string condition,bool showLabel)
+        {
+            if(showLabel){ImGui.Separator();ImGui.TextUnformatted(wardrobe.RuleLabel(condition));}
+            var owner=wardrobe.RuleOwner(condition);
+            var note=wardrobe.RuleNote(condition);
+            if(note.Length>0)ImGui.TextWrapped(note);
+            if(owner==wardrobe.Selected){ImGui.TextDisabled("Assigned to this design.");return;}
+            if(owner is {} other)
             {
-                WorkspaceControls.PickerHeading(edit);
+                var name=wardrobe.Designs.FirstOrDefault(d=>d.Id==other)?.Name??"another design";
+                ImGui.TextWrapped("This exact assignment belongs to "+name+".");
+                if(ImGui.Button("Move assignment..."))
+                {
+                    moveRequest=(wardrobe.Selected,condition,other);
+                    ImGui.OpenPopup("move-rule");
+                }
+                if(WorkspaceControls.BeginPicker("move-rule",300,140))
+                {
+                    WorkspaceControls.PickerHeading("Move assignment");
+                    ImGui.TextWrapped($"Move {wardrobe.RuleLabel(condition)} from {name} to {wardrobe.Title}?");
+                    if(ImGui.Button("Move") && moveRequest==(wardrobe.Selected,condition,other))
+                    {wardrobe.SaveRule(condition,other,false);ImGui.CloseCurrentPopup();}
+                    ImGui.SameLine();if(ImGui.Button("Cancel"))ImGui.CloseCurrentPopup();
+                    WorkspaceControls.EndPicker();
+                }
+            }
+            else if(ImGui.Button("Add assignment"))wardrobe.SaveRule(condition,null,false);
+        }
+        void Select(string title,ref string selected,IEnumerable<(string Key,string Name)> options,HashSet<string>? extras=null)
+        {
+            ImGui.PushID(title);
+            var list=options as (string Key,string Name)[]??options.ToArray();
+            var current=selected;var label=list.FirstOrDefault(o=>o.Key==current).Name??("Choose "+title.ToLowerInvariant());
+            if(extras is {Count:>0})label+="  +"+extras.Count;
+            ImGui.AlignTextToFramePadding();ImGui.TextUnformatted(title);ImGui.SameLine(120*S);
+            if(ImGui.Button(label+"###selector",new Vector2(-1,0))){assignmentSearch="";ImGui.OpenPopup("choices");}
+            AutoOpen(title=="Job or role"?"Jobs":title=="Location type"?"Zones":title,"choices");
+            if(WorkspaceControls.BeginPicker("choices",310,340))
+            {
+                WorkspaceControls.PickerHeading(title);
                 if(ImGui.IsWindowAppearing())ImGui.SetKeyboardFocusHere();
-                ImGui.SetNextItemWidth(-1);bool searched=ImGui.InputTextWithHint("##find",jobs?"Search jobs or abbreviations":"Search zones",ref assignmentSearch,80);
-                if(ImGui.BeginChild("options",new Vector2(-1,238*S)))
+                ImGui.SetNextItemWidth(-1);
+                bool searched=ImGui.InputTextWithHint("##find","Search",ref assignmentSearch,90);
+                string? choice=null;
+                if(ImGui.BeginChild("list",new Vector2(-1,Math.Clamp(list.Length,1,9)*26*S)))
                 {
                     if(searched)ImGui.SetScrollY(0);
-                    int count=0;
-                    foreach(var (id,name) in options.Where(x=>x.Name.Contains(assignmentSearch,StringComparison.OrdinalIgnoreCase)))
-                    {
-                        count++;
-                        var size=new Vector2(ImGui.GetContentRegionAvail().X,52*S);
-                        if(!ImGui.IsRectVisible(size)){ImGui.Dummy(size);continue;}
-                        bool active=assigned.Contains(id);
-                        string? owner=wardrobe.AssignmentOwner(type,id);
-                        if(WorkspaceControls.Tile("##"+id,name,active?"Assigned here":owner==null?"Available":"Assigned to "+owner,null,active,false,size.X))
-                            wardrobe.Assign(type,id,!active);
-                    }
-                    if(count==0)ImGui.TextDisabled("No matches");
+                    foreach(var option in list.Where(o=>o.Name.Contains(assignmentSearch,StringComparison.OrdinalIgnoreCase)))
+                        if(ImGui.Selectable(option.Name+"###"+option.Key,selected==option.Key || extras?.Contains(option.Key)==true,ImGuiSelectableFlags.DontClosePopups))choice=option.Key;
                 }
-                ImGui.EndChild(); WorkspaceControls.EndPicker();
-            }
-            if(assigned.Count==0)ImGui.TextDisabled(jobs?"No jobs assigned":"No zones assigned");
-            foreach(var (id,name) in options.Where(x=>assigned.Contains(x.Id)))
-            {
-                float width=ImGui.GetContentRegionAvail().X;
-                ImGui.SetNextItemWidth(width);
-                var origin=ImGui.GetCursorScreenPos();float side=24*S;
-                var dl=ImGui.GetWindowDrawList();
-                dl.AddRectFilled(origin,origin+new Vector2(width,side+8*S),0x80352d27u,4*S);
-                dl.PushClipRect(origin,origin+new Vector2(width-side-12*S,side+8*S),true);
-                dl.AddText(origin+new Vector2(9*S,(side+8*S-ImGui.GetTextLineHeight())/2),ImGui.GetColorU32(ImGuiCol.Text),name);
-                dl.PopClipRect();
-                ImGui.SetCursorScreenPos(origin+new Vector2(width-side-4*S,4*S));
-                if(WorkspaceControls.CloseButton("remove"+id,side,"Remove "+name))wardrobe.Assign(type,id,false);
-                ImGui.SetCursorScreenPos(origin);ImGui.Dummy(new Vector2(width,side+8*S));
+                ImGui.EndChild();
+                if(choice!=null)
+                {
+                    if(extras==null){selected=choice;ImGui.CloseCurrentPopup();}
+                    else if(selected==choice){selected=extras.FirstOrDefault()??"";extras.Remove(selected);}
+                    else if(selected.Length==0 || selected=="any" || choice=="any"){selected=choice;extras.Clear();}
+                    else if(!extras.Remove(choice))extras.Add(choice);
+                }
+                if(extras!=null && ImGui.Button("Done"))ImGui.CloseCurrentPopup();
+                WorkspaceControls.EndPicker();
             }
             ImGui.PopID();
-            ImGui.Spacing();ImGui.Separator();ImGui.Spacing();
         }
-        ImGui.TextDisabled("Zone assignments take priority over the current job.");
     }
     private void GroupSwitch(string group)
     {
