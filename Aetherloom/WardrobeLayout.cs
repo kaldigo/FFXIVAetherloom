@@ -53,6 +53,7 @@ internal interface IWardrobe
     string ImportStatus { get; }
     void StartImport(bool fromPlates,string url,string parent);
     void MoveDesign(Guid id,string folder);
+    void CloneDesign(Guid source,string name);
     bool RenameDesign(Guid id,string name);
     bool DeleteDesign(Guid id);
     bool RelocateFolder(string source,string parent,string name);
@@ -284,11 +285,21 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
             var label=entry?.Name??WardrobeLibrary.Label(contextFolder);
             var kind=isDesign?"design":"folder";
             var parent=WardrobeLibrary.Parent(contextFolder);
-            WorkspaceControls.PickerHeading(libraryAction switch{LibraryAction.Rename=>"Rename "+kind,LibraryAction.Delete=>"Delete "+kind,_=>label});
+            if(!isDesign || libraryAction!=LibraryAction.Menu)
+                WorkspaceControls.PickerHeading(libraryAction switch{LibraryAction.Rename=>"Rename "+kind,LibraryAction.Delete=>"Delete "+kind,_=>label});
             if(libraryAction==LibraryAction.Menu)
             {
                 if(ImGui.Selectable("Rename "+kind,false,ImGuiSelectableFlags.DontClosePopups))
                     {libraryAction=LibraryAction.Rename;focusName=true;}
+                if(isDesign && ImGui.Selectable("Clone design"))
+                {
+                    var baseName=entry!.Name.Replace('/', '\uFF0F').Replace('\\','\uFF3C');
+                    var stem=baseName+" (copy)";
+                    var siblings=wardrobe.Designs.Where(d=>d.Folder==entry.Folder).Select(d=>d.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    var name=stem;
+                    for(int number=2;siblings.Contains(name);number++)name=$"{baseName} (copy {number})";
+                    wardrobe.CloneDesign(contextDesign,name);
+                }
                 ImGui.PushStyleColor(ImGuiCol.Text,new Vector4(.95f,.60f,.58f,1));
                 if(ImGui.Selectable("Delete "+kind,false,ImGuiSelectableFlags.DontClosePopups))
                     libraryAction=LibraryAction.Delete;

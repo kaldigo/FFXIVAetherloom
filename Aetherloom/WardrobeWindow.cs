@@ -197,6 +197,46 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         if(!Call(()=>plugin.GetIpcSubscriber<string,string,string>(Api+"DissolveFolder").InvokeFunc(path,"[AL] ")))return false;
         Refresh();return true;
     }
+    public void CloneDesign(Guid source,string name)
+    {
+        if(!library.TryGetValue(source,out var entry))return;
+        var path=entry.Folder.Length==0?name:entry.Folder+"/"+name;
+        Guid cloneId=Guid.Empty;
+        if(!Call(()=>
+        {
+            var remote=plugin.GetIpcSubscriber<Guid,string?>("Glamourer.GetDesignBase64").InvokeFunc(source);
+            if(string.IsNullOrEmpty(remote))return "The source design is unavailable.";
+            var (code,id)=plugin.GetIpcSubscriber<string,string,(int,Guid)>("Glamourer.AddDesign").InvokeFunc(remote,path);
+            cloneId=id;
+            return code==0 && id!=Guid.Empty?"":$"Glamourer could not clone the design (code {code}).";
+        }))return;
+
+        if(Plans[source.ToString()] is JObject local)
+        {
+            var copy=(JObject)local.DeepClone();
+            copy["Identifier"]=cloneId.ToString();
+            copy["Name"]=name;
+            copy["Tags"]=new JArray(entry.Tags);
+            copy["LibraryLinked"]=true;
+            Plans[cloneId.ToString()]=copy;
+            Write();
+            if(Message.Length>0)
+            {
+                var failure=Message;
+                var removed=plugin.GetIpcSubscriber<Guid,int>("Glamourer.DeleteDesign");
+                if(Call(()=>removed.InvokeFunc(cloneId)==0?"":"Could not remove the unfinished clone."))
+                {
+                    Plans.Remove(cloneId.ToString());
+                    Message=failure;
+                }
+                else Message=failure+" "+Message;
+                return;
+            }
+        }
+        Refresh();
+        Select(cloneId);
+    }
+
     public bool RenameDesign(Guid id,string name)
     {
         if(!library.ContainsKey(id) || !Call(()=>plugin.GetIpcSubscriber<Guid,string,string>(Api+"RenameDesign").InvokeFunc(id,name)))return false;
