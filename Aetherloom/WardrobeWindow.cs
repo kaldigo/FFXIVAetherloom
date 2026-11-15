@@ -178,7 +178,18 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     }
     public bool CreateFolder(string parent,string name)
     {
-        if(!Call(()=>plugin.GetIpcSubscriber<string,string,string>(Api+"CreateFolder").InvokeFunc(parent,parent.Length==0?"[AL] "+name:name)))return false;
+        if(!Call(()=>plugin.GetIpcSubscriber<string,string,string>(Api+"CreateFolder").InvokeFunc(parent,WardrobeLibrary.StoredName(parent,name))))return false;
+        Refresh();return true;
+    }
+    public bool RelocateFolder(string source,string parent,string name)
+    {
+        if(!Call(()=>plugin.GetIpcSubscriber<string,string,string,string>(Api+"RelocateFolder")
+            .InvokeFunc(source,parent,WardrobeLibrary.StoredName(parent,name))))return false;
+        Refresh();return true;
+    }
+    public bool DeleteFolder(string path)
+    {
+        if(!Call(()=>plugin.GetIpcSubscriber<string,string,string>(Api+"DissolveFolder").InvokeFunc(path,"[AL] ")))return false;
         Refresh();return true;
     }
     public void MoveDesign(Guid id,string folder)

@@ -15,6 +15,9 @@ internal record WardrobeSlot(string Key,string Label,WardrobeItem Item,byte Firs
 internal sealed record LibraryDesign(Guid Id,string Name,string[] Tags,string Folder="",DateTimeOffset LastEdit=default);
 internal static class WardrobeLibrary
 {
+    internal static string StoredName(string parent,string label)=>parent.Length==0?"[AL] "+label:label;
+    internal static string PathFor(string parent,string label)=>parent.Length==0?StoredName(parent,label):parent+"/"+label;
+    internal static bool Within(string path,string ancestor)=>path==ancestor || path.StartsWith(ancestor+"/",StringComparison.Ordinal);
     internal const string Tag="aetherloom";
     internal const string LegacyTag="ui-wardrobe";
     internal static bool Tagged(IEnumerable<string> tags,string tag)=>tags.Contains(tag,StringComparer.OrdinalIgnoreCase);
@@ -43,6 +46,8 @@ internal interface IWardrobe
     bool Create(string name,string folder);
     bool CreateFolder(string parent,string name);
     void MoveDesign(Guid id,string folder);
+    bool RelocateFolder(string source,string parent,string name);
+    bool DeleteFolder(string path);
     void Tag(string tag,bool add);
     void SetItem(string key,uint id);
     void SetDye(string key,int channel,byte dye);
@@ -142,6 +147,11 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
     private string folder="";
     private string folderName="";
     private readonly HashSet<string> expanded=[];
+    private string contextFolder="";
+    private Vector2 contextPosition;
+    private enum FolderAction { Menu, Rename, Delete }
+    private FolderAction folderAction;
+    private bool focusName;
     private void Sidebar()
     {
         Heading("Wardrobe");
@@ -153,18 +163,21 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
             for(var current=folder;current.Length>0;current=WardrobeLibrary.Parent(current))expanded.Add(current);
         }
         if(!wardrobe.Folders.Contains(folder))folder="";
-        if(ImGui.Button("+ New design")){newName="";ImGui.OpenPopup("new-design");}
+        float buttonWidth=(ImGui.GetContentRegionAvail().X-ImGui.GetStyle().ItemSpacing.X)/2;
+        if(ImGui.Button("+ New design",new Vector2(buttonWidth,30*S))){newName="";ImGui.OpenPopup("new-design");}
         ImGui.SameLine();
-        if(ImGui.Button("+ Folder")){folderName="";ImGui.OpenPopup("new-folder");}
-        if(ImGui.BeginPopup("new-design"))
+        if(ImGui.Button("+ Folder",new Vector2(-1,30*S))){folderName="";ImGui.OpenPopup("new-folder");}
+        if(WorkspaceControls.BeginPicker("new-design",226,136))
         {
+            WorkspaceControls.PickerHeading("New design");ImGui.SetNextItemWidth(-1);
             ImGui.InputTextWithHint("##name","Design name",ref newName,80);
             if(newName.Trim().Length>0 && ImGui.Button("Create") && wardrobe.Create(newName.Trim(),folder))
                 ImGui.CloseCurrentPopup();
-            ImGui.EndPopup();
+            WorkspaceControls.EndPicker();
         }
-        if(ImGui.BeginPopup("new-folder"))
+        if(WorkspaceControls.BeginPicker("new-folder",226,136))
         {
+            WorkspaceControls.PickerHeading("New folder");ImGui.SetNextItemWidth(-1);
             ImGui.InputTextWithHint("##name","Folder name",ref folderName,80);
             if(folderName.Trim().Length>0 && ImGui.Button("Create") && wardrobe.CreateFolder(folder,folderName.Trim()))
             {
@@ -173,10 +186,11 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
                 expanded.Add(folder);
                 ImGui.CloseCurrentPopup();
             }
-            ImGui.EndPopup();
+            WorkspaceControls.EndPicker();
         }
         ImGui.SetNextItemWidth(-1);ImGui.InputTextWithHint("##filter","Filter names or tags",ref filter,128);
-        if(ImGui.Selectable("Wardrobe root###root",folder.Length==0))folder="";
+        ImGui.Spacing();ImGui.Separator();
+        if(WorkspaceControls.TreeRow("root","Wardrobe root",folder.Length==0,true))folder="";
         DropOn("");
         var terms=filter.Split(' ',StringSplitOptions.RemoveEmptyEntries);
         var designs=wardrobe.Designs.Where(d=>terms.All(word=>d.Name.Contains(word,StringComparison.OrdinalIgnoreCase)
@@ -187,30 +201,114 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         if(terms.Length!=0)
             foreach(var group in designs)
                 for(var ancestor=group.Key;ancestor.Length>0;ancestor=WardrobeLibrary.Parent(ancestor))matches.Add(ancestor);
+        bool requestMenu=false;
         DrawBranch("");
+        if(requestMenu)ImGui.OpenPopup("folder-actions");
+        FolderMenu();
+        if(terms.Length>0 && !designs.Any())ImGui.TextDisabled("No matching designs.");
         void DrawBranch(string parent)
         {
             foreach(var child in folders[parent])
             {
                 if(terms.Length>0 && !matches.Contains(child))continue;
                 var open=terms.Length>0||expanded.Contains(child);
-                if(ImGui.Selectable((open?"v  ":">  ")+WardrobeLibrary.Label(child)+"###folder/"+child,folder==child))
+                if(WorkspaceControls.TreeRow("folder/"+child,WardrobeLibrary.Label(child),folder==child,true,open))
                 {
                     folder=child;
                     if(!expanded.Add(child))expanded.Remove(child);
                 }
+                if(ImGui.IsItemClicked(ImGuiMouseButton.Right))
+                {
+                    contextFolder=child;folderName=WardrobeLibrary.Label(child);
+                    contextPosition=ImGui.GetMousePos();folderAction=FolderAction.Menu;requestMenu=true;
+                }
+                DragFolder(child);
                 DropOn(child);
                 if(open){ImGui.Indent(12*S);DrawBranch(child);ImGui.Unindent(12*S);}
             }
             foreach(var item in designs[parent])
             {
-                if(ImGui.Selectable(item.Name+"###"+item.Id,item.Id==wardrobe.Selected,0,new Vector2(0,26*S)))
+                if(WorkspaceControls.TreeRow(item.Id.ToString(),item.Name,item.Id==wardrobe.Selected,false))
                 {wardrobe.Select(item.Id);folder=parent;}
                 Drag(item);
             }
         }
         if(wardrobe.Message.Length>0)ImGui.TextWrapped(wardrobe.Message);
     }
+    private void FolderMenu()
+    {
+        if(!WorkspaceControls.BeginPicker("folder-actions",220,168,contextPosition))return;
+        if(!wardrobe.Folders.Contains(contextFolder))ImGui.CloseCurrentPopup();
+        else
+        {
+            var label=WardrobeLibrary.Label(contextFolder);
+            var parent=WardrobeLibrary.Parent(contextFolder);
+            WorkspaceControls.PickerHeading(folderAction switch{FolderAction.Rename=>"Rename folder",FolderAction.Delete=>"Delete folder",_=>label});
+            if(folderAction==FolderAction.Menu)
+            {
+                if(ImGui.Selectable("Rename folder",false,ImGuiSelectableFlags.DontClosePopups))
+                    {folderAction=FolderAction.Rename;focusName=true;}
+                ImGui.PushStyleColor(ImGuiCol.Text,new Vector4(.95f,.60f,.58f,1));
+                if(ImGui.Selectable("Delete folder",false,ImGuiSelectableFlags.DontClosePopups))
+                    folderAction=FolderAction.Delete;
+                ImGui.PopStyleColor();
+            }
+            else if(folderAction==FolderAction.Rename)
+            {
+                if(focusName){ImGui.SetKeyboardFocusHere();focusName=false;}
+                ImGui.SetNextItemWidth(-1);
+                bool enter=ImGui.InputText("##folder-name",ref folderName,80,ImGuiInputTextFlags.EnterReturnsTrue|ImGuiInputTextFlags.AutoSelectAll);
+                var name=folderName.Trim();
+                ImGui.BeginDisabled(name.Length==0);
+                bool save=ImGui.Button("Rename");
+                ImGui.EndDisabled();
+                if(name.Length>0 && (save||enter) && Relocate(contextFolder,parent,name))ImGui.CloseCurrentPopup();
+                ImGui.SameLine();if(ImGui.Button("Cancel"))ImGui.CloseCurrentPopup();
+            }
+            else
+            {
+                ImGui.TextWrapped($"Delete {label}? Its designs and subfolders will move up one level.");
+                if(ImGui.Button("Delete") && wardrobe.DeleteFolder(contextFolder))
+                {
+                    // Promoted children may acquire the managed prefix at the root.
+                    string Promote(string path)
+                    {
+                        if(path==contextFolder)return parent;
+                        var tail=path[(contextFolder.Length+1)..];
+                        return parent.Length==0?"[AL] "+tail:parent+"/"+tail;
+                    }
+                    Remap(contextFolder,Promote);
+                    ImGui.CloseCurrentPopup();
+                }
+                ImGui.SameLine();if(ImGui.Button("Cancel"))ImGui.CloseCurrentPopup();
+            }
+        }
+        if(folderAction!=FolderAction.Menu && wardrobe.Message.Length>0)ImGui.TextWrapped(wardrobe.Message);
+        WorkspaceControls.EndPicker();
+    }
+
+    private bool Relocate(string source,string parent,string name)
+    {
+        if(WardrobeLibrary.Within(parent,source) || !wardrobe.RelocateFolder(source,parent,name))return false;
+        var destination=WardrobeLibrary.PathFor(parent,name);
+        Remap(source,path=>destination+path[source.Length..]);
+        expanded.Add(parent);return true;
+    }
+    private void Remap(string source,Func<string,string> map)
+    {
+        if(WardrobeLibrary.Within(folder,source))folder=map(folder);
+        foreach(var path in expanded.Where(p=>WardrobeLibrary.Within(p,source)).ToArray())
+        {
+            expanded.Remove(path);expanded.Add(map(path));
+        }
+    }
+    private static void DragFolder(string path)
+    {
+        if(!ImGui.BeginDragDropSource())return;
+        ImGui.SetDragDropPayload("AETHERLOOM_FOLDER",System.Text.Encoding.UTF8.GetBytes(path));
+        ImGui.TextUnformatted(WardrobeLibrary.Label(path));ImGui.EndDragDropSource();
+    }
+
     private static void Drag(LibraryDesign design)
     {
         if(!ImGui.BeginDragDropSource())return;
@@ -228,6 +326,13 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         {
             wardrobe.MoveDesign(*(Guid*)payload.Data,path);
             expanded.Add(path);
+        }
+        var moved=ImGui.AcceptDragDropPayload("AETHERLOOM_FOLDER");
+        if(moved.Handle!=null && moved.IsDelivery() && moved.DataSize>0)
+        {
+            var source=System.Text.Encoding.UTF8.GetString(new ReadOnlySpan<byte>((void*)moved.Data,moved.DataSize));
+            if(wardrobe.Folders.Contains(source) && WardrobeLibrary.Parent(source)!=path)
+                Relocate(source,path,WardrobeLibrary.Label(source));
         }
         ImGui.EndDragDropTarget();
     }

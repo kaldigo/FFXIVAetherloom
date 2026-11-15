@@ -1,1 +1,1 @@
-The wider wardrobe sidebar shows designs tagged aetherloom, mirrors Glamourer folders beginning with [AL], and supports folder creation and drag-and-drop. Update the Glamourer fork alongside Aetherloom. Old ui-wardrobe plans migrate with their existing design IDs.
+Right-click wardrobe folders to rename or delete them, or drag a folder onto another folder or Wardrobe root. Deletion moves contents up one level. The sidebar now uses folder icons, outfit hangers, and separate folder and design highlights. Update the Glamourer fork for the new folder operations.

@@ -16,7 +16,7 @@ The fork exposes `Aether.Glamourer.UpdateDesign(Guid id, string json) -> int` on
 
 | Area | Contents |
 | --- | --- |
-| Left sidebar | 250-pixel design tree. Show designs with the exact aetherloom tag. Mirror top-level [AL] folders and their descendants, hiding the prefix. Tagged designs elsewhere appear at the root. Search design names and tags, create folders and drag designs to a folder or the root. |
+| Left sidebar | 250-pixel design tree. Show designs with the exact aetherloom tag. Mirror top-level [AL] folders and their descendants, hiding the prefix. Tagged designs elsewhere appear at the root. Search design names and tags, create folders and drag designs or folders to a folder or the root. Right-click a folder to rename it or delete it and move its contents to the parent. |
 | Design header | Design name, a read-only job tag derived from the selected main-hand weapon, editable outfit tags, and Apply to character. Use the remaining header width for tags. Keep these controls visible on every tab. |
 | Gear tab | Equipped appearance for weapons and armor, both dye channels where supported, and per-slot application controls. Show the existing missing-item border and tooltip beside the affected selector. Place Copy to glamour plate here. |
 | Accessories tab | Earrings, necklace, bracelets, right ring and left ring. Use the same slot controls and missing-item border as Gear. Read each item’s dye-channel count and display zero, one or two editable swatches accordingly. |
