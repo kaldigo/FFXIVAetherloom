@@ -197,41 +197,109 @@ internal sealed partial class WardrobeLayout
         }
     }
 
+    private string audienceSearch="";
+
+    private void AudienceField(string group,WardrobeTag[] tags)
+    {
+        bool jobs=group==WardrobeMetadata.Intended;
+        string current=WardrobeMetadata.Single(group,tags);
+        bool inline=ImGui.GetContentRegionAvail().X>230*S;
+        ImGui.AlignTextToFramePadding();ImGui.TextUnformatted(group);
+        if(inline)ImGui.SameLine();
+        var popup="choose-"+group;
+        var width=ImGui.GetContentRegionAvail().X;
+        if(ImGui.Button("###field-"+group,new Vector2(width,ImGui.GetFrameHeight())))
+        {
+            audienceSearch="";
+            ImGui.OpenPopup(popup);
+        }
+        var min=ImGui.GetItemRectMin();
+        var max=ImGui.GetItemRectMax();
+        var ink=ImGui.GetColorU32(ImGuiCol.Text);
+        var dl=ImGui.GetWindowDrawList();
+        dl.PushClipRect(min,new Vector2(max.X-25*S,max.Y),true);
+        dl.AddText(new Vector2(min.X+9*S,(min.Y+max.Y-ImGui.GetTextLineHeight())/2),ink,current);
+        dl.PopClipRect();
+        var mid=new Vector2(max.X-13*S,(min.Y+max.Y)/2);
+        bool open=ImGui.IsPopupOpen(popup);
+        float dy=(open?-2:2)*S;
+        dl.AddLine(mid+new Vector2(-4*S,-dy),mid+new Vector2(0,dy),ink,1.5f*S);
+        dl.AddLine(mid+new Vector2(0,dy),mid+new Vector2(4*S,-dy),ink,1.5f*S);
+        if(open)dl.AddRect(min,max,WorkspaceControls.Accent,5*S);
+        if(ImGui.IsItemHovered() && ImGui.CalcTextSize(current).X>width-34*S)ImGui.SetTooltip(current);
+        AutoOpen(group,popup);
+        if(!WorkspaceControls.BeginPicker(popup,Math.Max(width/S,jobs?285:188),jobs?334:202,min+new Vector2(0,max.Y-min.Y+4*S)))return;
+        string? chosen=null;
+        try
+        {
+            WorkspaceControls.PickerHeading(group);
+            if(jobs)
+            {
+                if(ImGui.IsWindowAppearing())ImGui.SetKeyboardFocusHere();
+                ImGui.SetNextItemWidth(-1);
+                bool changed=ImGui.InputTextWithHint("##audience-search","Search roles, jobs or abbreviations",ref audienceSearch,80);
+                ImGui.PushStyleVar(ImGuiStyleVar.ScrollbarSize,8*S);
+                bool visible=ImGui.BeginChild("role-list",new Vector2(-1,234*S));
+                ImGui.PopStyleVar();
+                try
+                {
+                    if(visible)
+                    {
+                        if(changed)ImGui.SetScrollY(0);
+                        bool any=false;
+                        foreach(var (section,values) in WardrobeMetadata.Audience)
+                        {
+                            var matches=values.Where(v=>WardrobeMetadata.ContainsText(v,audienceSearch.Trim())).ToArray();
+                            if(matches.Length==0)continue;
+                            if(any)ImGui.Separator();
+                            ImGui.TextDisabled(section);
+                            foreach(var value in matches)Choice(value);
+                            any=true;
+                        }
+                        if(!any)ImGui.TextDisabled("No matching roles or jobs");
+                    }
+                }
+                finally { ImGui.EndChild(); }
+            }
+            else foreach(var value in Options(group))Choice(value);
+            if(chosen!=null)ImGui.CloseCurrentPopup();
+        }
+        finally { WorkspaceControls.EndPicker(); }
+        if(chosen!=null && !current.Equals(chosen,StringComparison.OrdinalIgnoreCase))
+            wardrobe.EditTags(tags.Where(t=>t.Group==group).Select(t=>t.Raw).ToArray(),
+                chosen==WardrobeMetadata.Defaults[group][0]?null:WardrobeMetadata.Encode(group,chosen));
+
+        void Choice(string value)
+        {
+            bool selected=current.Equals(value,StringComparison.OrdinalIgnoreCase);
+            var pos=ImGui.GetCursorScreenPos();
+            var rowWidth=ImGui.GetContentRegionAvail().X;
+            ImGui.PushStyleVar(ImGuiStyleVar.SelectableTextAlign,new Vector2(0,.5f));
+            if(ImGui.Selectable(value,selected,ImGuiSelectableFlags.DontClosePopups,new Vector2(0,23*S)))chosen=value;
+            ImGui.PopStyleVar();
+            var draw=ImGui.GetWindowDrawList();
+            if(jobs && WardrobeMetadata.JobAliases.TryGetValue(value,out var abbr))
+                draw.AddText(new Vector2(pos.X+rowWidth-ImGui.CalcTextSize(abbr).X-19*S,pos.Y+(23*S-ImGui.GetTextLineHeight())/2),ImGui.GetColorU32(ImGuiCol.TextDisabled),abbr);
+            if(selected)
+            {
+                var tick=pos+new Vector2(rowWidth-10*S,10*S);
+                draw.AddLine(tick-new Vector2(4,0)*S,tick+new Vector2(-1,3)*S,WorkspaceControls.Accent,1.6f*S);
+                draw.AddLine(tick+new Vector2(-1,3)*S,tick+new Vector2(5,-4)*S,WorkspaceControls.Accent,1.6f*S);
+            }
+        }
+    }
+
     private void DrawDetails()
     {
         var tags=wardrobe.Tags.Where(WardrobeLibrary.VisibleTag).Select(WardrobeMetadata.Decode).ToArray();
         if(ImGui.BeginTable("audience",2,ImGuiTableFlags.SizingStretchSame))
         {
-            foreach(var group in new[]{WardrobeMetadata.Gender,WardrobeMetadata.Intended})
+            try
             {
-                ImGui.TableNextColumn();ImGui.PushID(group);
-                bool inline=ImGui.GetContentRegionAvail().X>200*S;
-                ImGui.AlignTextToFramePadding();ImGui.TextUnformatted(group);
-                if(inline)ImGui.SameLine();
-                ImGui.SetNextItemWidth(-1);
-                var current=WardrobeMetadata.Single(group,tags);
-                if(ImGui.BeginCombo("##value",current))
-                {
-                    SearchOptions();
-                    if(group==WardrobeMetadata.Gender)
-                        foreach(var value in Options(group).Where(v=>WardrobeMetadata.ContainsText(v,optionSearch)))Choice(value);
-                    else foreach(var (section,values) in WardrobeMetadata.Audience)
-                    {
-                        var matches=values.Where(v=>WardrobeMetadata.ContainsText(v,optionSearch)).ToArray();
-                        if(matches.Length==0)continue;
-                        ImGui.TextDisabled(section);foreach(var value in matches)Choice(value);
-                    }
-                    ImGui.EndCombo();
-                }
-                ImGui.PopID();
-                void Choice(string value)
-                {
-                    if(ImGui.Selectable(value,current.Equals(value,StringComparison.OrdinalIgnoreCase)))
-                        wardrobe.EditTags(tags.Where(t=>t.Group==group).Select(t=>t.Raw).ToArray(),
-                            value==WardrobeMetadata.Defaults[group][0]?null:WardrobeMetadata.Encode(group,value));
-                }
+                ImGui.TableNextColumn();AudienceField(WardrobeMetadata.Gender,tags);
+                ImGui.TableNextColumn();AudienceField(WardrobeMetadata.Intended,tags);
             }
-            ImGui.EndTable();
+            finally { ImGui.EndTable(); }
         }
         foreach(var group in WardrobeMetadata.Categories)
         {

@@ -1,1 +1,1 @@
-The wardrobe sidebar has a smaller left inset and runs flush to the divider on the right. The scrolling design list now uses a slimmer scrollbar.
+The Details tab now uses anchored wardrobe pickers for Designed for and Intended for, with clearer selection indicators and searchable, grouped roles and jobs.
