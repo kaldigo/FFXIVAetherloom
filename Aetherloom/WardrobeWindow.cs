@@ -13,7 +13,7 @@ using Newtonsoft.Json.Linq;
 
 namespace Aetherloom;
 
-internal sealed class WardrobeWindow : Window, IWardrobe
+internal sealed partial class WardrobeWindow : Window, IWardrobe
 {
     private readonly IDalamudPluginInterface plugin;
     private readonly IDataManager data;
@@ -69,6 +69,7 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     public override void Draw()
     {
         if(Environment.TickCount64>=nextRefresh)Refresh();
+        AdvanceImport();
         preview.WindowOrigin=ImGui.GetWindowPos();preview.WindowSize=ImGui.GetWindowSize();
         layout.Draw(()=>IsOpen=false);
     }
@@ -298,14 +299,11 @@ internal sealed class WardrobeWindow : Window, IWardrobe
             yield return new(key,Labels.GetValueOrDefault(key.Split('/')[0],key),Resolve(slot.Value<ulong>("ItemId")),slot.Value<byte>("Stain"),slot.Value<byte>("Stain2"),slot.Value<bool>("Apply"));
         }
     }
-    private static bool Fits(EquipSlotCategory e,string key)=>key switch{
-        "MainHand"=>e.MainHand>0,"OffHand"=>e.OffHand>0,"Head"=>e.Head>0,"Body"=>e.Body>0,"Hands"=>e.Gloves>0,
-        "Legs"=>e.Legs>0,"Feet"=>e.Feet>0,"Ears"=>e.Ears>0,"Neck"=>e.Neck>0,"Wrists"=>e.Wrists>0,"RFinger"=>e.FingerR>0,"LFinger"=>e.FingerL>0,_=>false};
     public IEnumerable<WardrobeItem> Catalog(string key)
     {
         var slot=key.Split('/')[0];
         if(!catalogs.TryGetValue(slot,out var items))
-            catalogs[slot]=items=data.GetExcelSheet<Item>().Where(i=>i.EquipSlotCategory.RowId!=0 && Fits(i.EquipSlotCategory.Value,slot))
+            catalogs[slot]=items=data.GetExcelSheet<Item>().Where(i=>i.EquipSlotCategory.RowId!=0 && WardrobeImportData.Fits(i.EquipSlotCategory.Value,slot))
                 .Select(FromRow).Where(i=>i.Name.Length>0).OrderBy(i=>i.Name).ToList();
         if(slot!="MainHand")return items;
         var used=Slots(false).Where(x=>x.Key!=key&&x.Key.StartsWith("MainHand")).SelectMany(x=>Jobs(x.Item.Jobs)).ToHashSet();

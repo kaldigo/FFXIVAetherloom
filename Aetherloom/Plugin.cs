@@ -40,6 +40,7 @@ public sealed class Plugin : IDalamudPlugin
         plugin.UiBuilder.OpenMainUi -= Open;
         plugin.UiBuilder.Draw -= windows.Draw;
         windows.RemoveAllWindows();
+        window.DisposeImports();
         preview.Dispose();
         ownership.Dispose();
     }

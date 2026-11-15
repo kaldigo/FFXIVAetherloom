@@ -1,1 +1,1 @@
-Rename or delete designs from their wardrobe context menu. Search by job name or abbreviation, complete tags from the existing library, or empty a gear or accessory slot. Includes new assignment pickers, a larger header mark, centred close buttons and a design-only preview. Update the Glamourer fork alongside Aetherloom.
+Import a public Eorzea Collection outfit by URL or copy your saved Glamaholic library with its folder hierarchy, plates, tags and dyes. Repeating an import preserves existing wardrobe edits.

@@ -8,6 +8,12 @@ Open `/aetherloom` and click **Preview current gear** to load a copy of your cha
 
 The editor, filtered copies for Glamourer automation, and transfer to native glamour plates are described in the [UI plan](docs/wardrobe-ui-plan.md). Plate transfers require actual dresser or armoire stock.
 
+## Importing designs
+
+Open **Import** in the wardrobe sidebar. Paste an Eorzea Collection glamour URL to import its gear and both dye channels into the selected folder. The result lists any item or dye names the game could not match.
+
+**Import saved library** reads Glamaholic from the current Dalamud profile and copies plates, tags and nested folders into **Glamaholic** at the wardrobe root. Slashes in names use a full-width slash so they stay part of the name. Both importers skip designs already copied, preserving subsequent edits.
+
 ## Development
 
 Build with `dotnet build Aetherloom/Aetherloom.csproj -c Release` using Dalamud API 15 development references. Add the generated `Aetherloom/bin/Release/Aetherloom.dll` to Dalamud's dev plugin locations and enable Glamourer. Run the inventory and cache checks with `dotnet run --project tests/Ownership` and the acquisition tests with `python -m unittest discover -s tests`.

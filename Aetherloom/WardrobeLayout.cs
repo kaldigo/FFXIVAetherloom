@@ -49,6 +49,9 @@ internal interface IWardrobe
     IReadOnlyCollection<string> Folders { get; }
     bool Create(string name,string folder);
     bool CreateFolder(string parent,string name);
+    bool ImportBusy { get; }
+    string ImportStatus { get; }
+    void StartImport(bool fromPlates,string url,string parent);
     void MoveDesign(Guid id,string folder);
     bool RenameDesign(Guid id,string name);
     bool DeleteDesign(Guid id);
@@ -79,6 +82,7 @@ internal interface IWardrobe
 internal sealed class WardrobeLayout(IWardrobe wardrobe)
 {
     private readonly WindowShell shell=new(){ShowIconRail=false,ShowPageHeading=false,EdgeToEdgeBody=true};
+    private string importUrl="";
     private string filter="",newName="",newTag="",search="";
     internal string Tab="Gear";
     internal string? OpenPicker;
@@ -172,10 +176,30 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
             for(var current=folder;current.Length>0;current=WardrobeLibrary.Parent(current))expanded.Add(current);
         }
         if(!wardrobe.Folders.Contains(folder))folder="";
-        float buttonWidth=(ImGui.GetContentRegionAvail().X-ImGui.GetStyle().ItemSpacing.X)/2;
-        if(ImGui.Button("+ New design",new Vector2(buttonWidth,30*S))){newName="";ImGui.OpenPopup("new-design");}
+        float buttonWidth=(ImGui.GetContentRegionAvail().X-2*ImGui.GetStyle().ItemSpacing.X)/3;
+        if(ImGui.Button("+ Design",new Vector2(buttonWidth,30*S))){newName="";ImGui.OpenPopup("new-design");}
         ImGui.SameLine();
-        if(ImGui.Button("+ Folder",new Vector2(-1,30*S))){folderName="";ImGui.OpenPopup("new-folder");}
+        if(ImGui.Button("+ Folder",new Vector2(buttonWidth,30*S))){folderName="";ImGui.OpenPopup("new-folder");}
+        ImGui.SameLine();
+        if(ImGui.Button("Import",new Vector2(-1,30*S)))ImGui.OpenPopup("wardrobe-import");
+        AutoOpen("import","wardrobe-import");
+        if(WorkspaceControls.BeginPicker("wardrobe-import",344,300))
+        {
+            WorkspaceControls.PickerHeading("Import designs");
+            ImGui.BeginDisabled(wardrobe.ImportBusy);
+            ImGui.TextUnformatted("Eorzea Collection");
+            ImGui.SetNextItemWidth(-1);
+            ImGui.InputTextWithHint("##outfit-url","Paste a glamour URL",ref importUrl,1024);
+            ImGui.TextDisabled("Destination: "+(folder.Length==0?"Wardrobe root":WardrobeLibrary.Label(folder)));
+            if(ImGui.Button("Import outfit"))wardrobe.StartImport(false,importUrl,folder);
+            ImGui.Spacing();ImGui.Separator();ImGui.Spacing();
+            ImGui.TextUnformatted("Glamaholic");
+            ImGui.TextWrapped("Copy saved plates and folders into the Glamaholic folder. Existing imports are skipped.");
+            if(ImGui.Button("Import saved library"))wardrobe.StartImport(true,"","");
+            ImGui.EndDisabled();
+            if(wardrobe.ImportStatus.Length>0){ImGui.Spacing();ImGui.TextWrapped(wardrobe.ImportStatus);}
+            WorkspaceControls.EndPicker();
+        }
         if(WorkspaceControls.BeginPicker("new-design",226,136))
         {
             WorkspaceControls.PickerHeading("New design");ImGui.SetNextItemWidth(-1);
