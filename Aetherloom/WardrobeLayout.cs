@@ -14,6 +14,7 @@ internal record WardrobeStyle(byte Id,string Name,uint Icon);
 internal record WardrobeSlot(string Key,string Label,WardrobeItem Item,byte First,byte Second,bool Apply);
 internal interface IWardrobe
 {
+    ImTextureID? HeaderMark => null;
     IEnumerable<(Guid Id,string Name,string[] Tags)> Designs { get; }
     Guid Selected { get; }
     string Title { get; }
@@ -77,8 +78,9 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         ImGui.PushStyleColor(ImGuiCol.PopupBg,new Vector4(.10f,.14f,.17f,.99f));
         try {
         shell.Draw("Aetherloom","",[new Destination("wardrobe","Wardrobe","",Body)],(p,size)=>{
-            var dl=ImGui.GetWindowDrawList(); var c=p+new Vector2(size/2);
-            dl.AddQuadFilled(c-new Vector2(0,size*.48f),c+new Vector2(size*.28f,0),c+new Vector2(0,size*.48f),c-new Vector2(size*.28f,0),WorkspaceControls.Accent);
+            if (wardrobe.HeaderMark is not {} mark) return;
+            var position=new Vector2(ImGui.GetWindowPos().X+ImGui.GetWindowWidth()-3*size,p.Y);
+            ImGui.GetWindowDrawList().AddImage(mark,position,position+new Vector2(size));
         });
         } finally { ImGui.PopStyleColor(6); }
     }

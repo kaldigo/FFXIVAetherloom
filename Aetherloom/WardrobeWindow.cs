@@ -18,6 +18,7 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     private readonly IDalamudPluginInterface plugin;
     private readonly IDataManager data;
     private readonly ITextureProvider textures;
+    public ImTextureID? HeaderMark => textures.GetFromManifestResource(typeof(WardrobeWindow).Assembly, "Aetherloom.mark.png").GetWrapOrDefault()?.Handle;
     private readonly IObjectTable objects;
     private readonly WardrobeOwnership ownership;
     private readonly CharacterPreview preview;

@@ -13,6 +13,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="$(AetherglassSource)/Library/AetherglassUI.csproj" />
+    <EmbeddedResource Include="../assets/mark.png" LogicalName="Aetherloom.mark.png" />
     <EmbeddedResource Include="WardrobeExceptions.json" />
   </ItemGroup>
 </Project>
