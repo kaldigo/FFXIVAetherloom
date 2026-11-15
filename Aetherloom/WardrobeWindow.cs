@@ -64,7 +64,7 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     }
     public override void PreDraw()=>WindowShell.PushHostStyle();
     public override void PostDraw()=>WindowShell.PopHostStyle();
-    public override void OnOpen(){ lastSnapshot=null;Refresh(); preview.Start(Selected!=Guid.Empty); }
+    public override void OnOpen(){ lastSnapshot=null;Refresh(); preview.Start(); }
     public override void OnClose()=>preview.Close();
     public override void Draw()
     {
@@ -89,6 +89,8 @@ internal sealed class WardrobeWindow : Window, IWardrobe
                 snapshot=plugin.GetIpcSubscriber<string>(Api+"DesignLibrary").InvokeFunc();
                 root=JObject.Parse(snapshot);entries=root["Designs"]!.ToObject<LibraryDesign[]>()!;
             }
+            KnownTags=entries.SelectMany(d=>d.Tags).Where(WardrobeLibrary.VisibleTag).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+            weaponJobTerms.Clear();
             var previous=library.GetValueOrDefault(Selected);
             library=entries.Where(d=>WardrobeLibrary.Tagged(d.Tags,WardrobeLibrary.Tag)).ToDictionary(d=>d.Id);
             Folders=root["Folders"]!.ToObject<string[]>()!.Where(WardrobeLibrary.Managed).ToArray();
@@ -159,6 +161,7 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     }
     private void Save()
     {
+        weaponJobTerms.Remove(Selected);
         projection=null;design["LibraryLinked"]=true;design["Tags"]=new JArray(Tags);design["Name"]=Title;Plans[Selected.ToString()]=design.DeepClone();
         Write();
     }
@@ -192,6 +195,22 @@ internal sealed class WardrobeWindow : Window, IWardrobe
         if(!Call(()=>plugin.GetIpcSubscriber<string,string,string>(Api+"DissolveFolder").InvokeFunc(path,"[AL] ")))return false;
         Refresh();return true;
     }
+    public bool RenameDesign(Guid id,string name)
+    {
+        if(!library.ContainsKey(id) || !Call(()=>plugin.GetIpcSubscriber<Guid,string,string>(Api+"RenameDesign").InvokeFunc(id,name)))return false;
+        if(Plans[id.ToString()] is JObject local){local["Name"]=name;Write();}
+        Refresh();return true;
+    }
+    public bool DeleteDesign(Guid id)
+    {
+        if(!library.ContainsKey(id) || !Call(()=>plugin.GetIpcSubscriber<Guid,string>(Api+"DeleteDesign").InvokeFunc(id)))return false;
+        Plans.Remove(id.ToString());assignedJobTerms=null;
+        foreach(var character in assignments.Properties().Select(p=>p.Value).OfType<JObject>())
+            foreach(var type in character.Properties().Select(p=>p.Value).OfType<JObject>())
+                foreach(var binding in type.Properties().Where(p=>Guid.TryParse((string?)p.Value,out var owner) && owner==id).ToArray())
+                    binding.Remove();
+        Write();Refresh();return true;
+    }
     public void MoveDesign(Guid id,string folder)
     {
         if(library.ContainsKey(id) && Call(()=>plugin.GetIpcSubscriber<Guid,string,string>(Api+"MoveDesign").InvokeFunc(id,folder)))Refresh();
@@ -211,9 +230,47 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     private WardrobeItem Resolve(ulong id)
     {
         if(id==0)return new(0,"Empty",0,0);
-        if(id>uint.MaxValue||!data.GetExcelSheet<Item>().TryGetRow((uint)id,out var row))return new(0,"Empty / custom model",0,0);
+        if(id>uint.MaxValue||!data.GetExcelSheet<Item>().TryGetRow((uint)id,out var row))return new(0,"Custom model",0,0);
         if(!known.TryGetValue((uint)id,out var item)) known[(uint)id]=item=FromRow(row);
         return item;
+    }
+    public IReadOnlyList<string> KnownTags {get;private set;}=[];
+    private readonly Dictionary<Guid,string[]> weaponJobTerms=[];
+    private Dictionary<string,string[]>? jobNames;
+    private ulong searchCharacter;
+    private Dictionary<Guid,List<string>>? assignedJobTerms;
+    public IEnumerable<string> JobTerms(Guid id)
+    {
+        if(!weaponJobTerms.TryGetValue(id,out var terms))
+        {
+            if(!library.TryGetValue(id,out var entry))return [];
+            var plan=Plans[id.ToString()] as JObject;
+            var ids=new List<ulong>{plan?["Equipment"]?["MainHand"]?.Value<ulong?>("ItemId")??entry.MainHand};
+            if(plan?["AdditionalMainHands"] is JObject extras)
+                ids.AddRange(extras.Properties().Select(p=>p.Value.Value<ulong?>("ItemId")??0UL));
+            var localized=data.GetExcelSheet<ClassJob>();
+            jobNames??=data.GetExcelSheet<ClassJob>(Dalamud.Game.ClientLanguage.English).Where(j=>j.RowId>0)
+                .ToDictionary(j=>j.Abbreviation.ExtractText(),j=>new[]{j.Name.ExtractText(),localized.GetRow(j.RowId).Name.ExtractText(),localized.GetRow(j.RowId).Abbreviation.ExtractText()});
+            terms=ids.SelectMany(item=>Jobs(Resolve(item).Jobs)).Distinct()
+                .SelectMany(abbr=>(jobNames.GetValueOrDefault(abbr)??[]).Prepend(abbr)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            weaponJobTerms[id]=terms;
+        }
+        if(!HasCharacter)return terms;
+        if(assignedJobTerms==null || searchCharacter!=ownership.Character)
+        {
+            searchCharacter=ownership.Character;assignedJobTerms=[];
+            var jobs=data.GetExcelSheet<ClassJob>(Dalamud.Game.ClientLanguage.English);
+            var local=data.GetExcelSheet<ClassJob>();
+            foreach(var assignment in Bindings("Jobs").Properties())
+            {
+                if(!Guid.TryParse((string?)assignment.Value,out var owner) || !uint.TryParse(assignment.Name,out var jobId)
+                    || !jobs.TryGetRow(jobId,out var job))continue;
+                if(!assignedJobTerms.TryGetValue(owner,out var labels))assignedJobTerms[owner]=labels=[];
+                labels.Add(job.Name.ExtractText());labels.Add(job.Abbreviation.ExtractText());
+                var translated=local.GetRow(jobId);labels.Add(translated.Name.ExtractText());labels.Add(translated.Abbreviation.ExtractText());
+            }
+        }
+        return assignedJobTerms.TryGetValue(id,out var assigned)?terms.Concat(assigned):terms;
     }
     private readonly Dictionary<uint,string> eligibleJobs=[];
     private WardrobeItem FromRow(Item item)
@@ -257,7 +314,13 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     private static string[] Jobs(string jobs)=>jobs.Split([' ',',','/'],StringSplitOptions.RemoveEmptyEntries);
     public Picture? Icon(uint icon)=>icon!=0 && textures.GetFromGameIcon(new GameIconLookup(icon)).TryGetWrap(out var wrap,out _)?new Picture(wrap.Handle):null;
     public string Availability(uint item)=>ownership.Availability(item);
-    public void SetItem(string key,uint id){var slot=Entry(key);slot["ItemId"]=id;slot["Apply"]=true;if(key.StartsWith("MainHand"))previewHand=key;Save();}
+    public void SetItem(string key,uint id)
+    {
+        var slot=Entry(key);slot["ItemId"]=id;slot["Apply"]=true;
+        if(id==0){slot["Stain"]=0;slot["Stain2"]=0;slot["ApplyStain"]=true;}
+        if(key.StartsWith("MainHand"))previewHand=key;
+        Save();
+    }
     public void SetDye(string key,int channel,byte dye){var slot=Entry(key);slot[channel==0?"Stain":"Stain2"]=dye;slot["ApplyStain"]=true;Save();}
     public void SetApply(string key,bool apply){var entry=Entry(key);entry["Apply"]=apply;entry["ApplyStain"]=apply;Save();}
     public void MainHand(string? remove)
@@ -329,14 +392,21 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     public IEnumerable<(uint Id,string Name)> AssignmentOptions(string type)
     {
         if(assignmentOptions.TryGetValue(type,out var values))return values;
-        var list=type=="Jobs"?data.GetExcelSheet<ClassJob>().Where(j=>j.RowId>0).Select(j=>(j.RowId,j.Name.ExtractText())):
+        var list=type=="Jobs"?data.GetExcelSheet<ClassJob>().Where(j=>j.RowId>0).Select(j=>(j.RowId,j.Name.ExtractText()+" ("+j.Abbreviation.ExtractText()+")")):
             data.GetExcelSheet<TerritoryType>().Where(t=>t.PlaceName.RowId!=0).Select(t=>(t.RowId,t.PlaceName.Value.Name.ExtractText()));
-        return assignmentOptions[type]=list.OrderBy(x=>x.Item2).ToArray();
+        return assignmentOptions[type]=list.GroupBy(x=>x.Item2).SelectMany(g=>g.Select(option=>
+            (option.RowId,g.Count()>1?$"{option.Item2} (#{option.RowId})":option.Item2))).OrderBy(x=>x.Item2).ToArray();
+    }
+    public string? AssignmentOwner(string type,uint id)
+    {
+        if(!Guid.TryParse((string?)Bindings(type)[id.ToString()],out var owner))return null;
+        return library.GetValueOrDefault(owner)?.Name??"Another design";
     }
     public IReadOnlyCollection<uint> Assigned(string type)=>Bindings(type).Properties().Where(p=>(string?)p.Value==Selected.ToString()).Select(p=>uint.Parse(p.Name)).ToArray();
     public void Assign(string type,uint id,bool enabled)
     {
         if(!HasCharacter)return;
+        if(type=="Jobs")assignedJobTerms=null;
         if(enabled)Bindings(type)[id.ToString()]=Selected.ToString();else Bindings(type).Remove(id.ToString()); Write();
     }
     public ISet<byte> FavoriteDyes{get;}=new HashSet<byte>();
@@ -357,11 +427,10 @@ internal sealed class WardrobeWindow : Window, IWardrobe
         Save();
     }
     public void ResetCamera()=>preview.ResetCamera();
-    public void PreviewOptions()
+    public void WeaponSelector()
     {
-        preview.Options(Selected!=Guid.Empty);
         var hands=Slots(false).Where(x=>x.Key.StartsWith("MainHand")&&x.Item.Id!=0).ToArray();
-        if(hands.Length>1 && ImGui.BeginCombo("Weapon",hands.FirstOrDefault(x=>x.Key==previewHand)?.Item.Name??"Select weapon"))
+        if(hands.Length>1 && ImGui.BeginCombo("Preview weapon",hands.FirstOrDefault(x=>x.Key==previewHand)?.Item.Name??"Select weapon"))
         {foreach(var hand in hands)if(ImGui.Selectable(hand.Item.Name+"###"+hand.Key,hand.Key==previewHand)){previewHand=hand.Key;projection=null;}ImGui.EndCombo();}
     }
     public void DrawPreview()

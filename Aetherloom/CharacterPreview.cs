@@ -43,7 +43,6 @@ internal sealed unsafe class CharacterPreview : IDisposable
     {
         public void Dispose(){}
     }
-    private bool previewDesign;
     private string notes = "";
     private CharaView* view;
     private OffscreenRenderingManager* backgroundOwner;
@@ -77,42 +76,24 @@ internal sealed unsafe class CharacterPreview : IDisposable
         addons.RegisterListener(AddonEvent.PreSetup, "BannerParty", OnPartyPortraits);
     }
 
-    public void Start(bool design) { cameraMoves.Clear();resetCamera=true; requested=true; previewDesign=design; status=""; }
+    public void Start() { cameraMoves.Clear();resetCamera=true; requested=true; status=""; }
 
     public void Close()
     {
         cameraInput.EndDrag();
         requested = false;
+        selectedDesign=null;
         textureId = 0;
         DiscardStill();
         status = "";
     }
 
-    public void Options(bool hasDesign)
-    {
-        if (hasDesign && (!requested || !previewDesign))
-        {
-            if (ImGui.Button("Preview selected design"))
-            {
-                previewDesign = true;
-                requested = true;
-                status = "";
-            }
-
-        }
-        if ((!requested || previewDesign) && ImGui.Button("Preview current gear"))
-        {
-            previewDesign = false;
-            requested = true;
-            status = "";
-        }
-        if(requested && ImGui.Button("Stop preview"))Close();
-    }
-
     public void Draw(JObject? design)
     {
         lastDraw=Environment.TickCount64;
+        if(!ReferenceEquals(selectedDesign,design)){requested=design!=null;status="";}
         selectedDesign=design;
+        if(design==null)return;
         var image=still?.Handle??new ImTextureID((ulong)textureId);
         if (!requested || (textureId==0 && still==null))
         {
@@ -140,7 +121,8 @@ internal sealed unsafe class CharacterPreview : IDisposable
     private void Update(IFramework _)
     {
         if (!requested) { Release(); return; }
-        var desired = previewDesign ? selectedDesign : null;
+        var desired=selectedDesign;
+        if(desired==null){DiscardStill();Release();return;}
 
         if (conditions[ConditionFlag.BetweenAreas] || conditions[ConditionFlag.BetweenAreas51]
             || objects.LocalPlayer is not { } actor || (view != null && actor.Address != player))
@@ -412,7 +394,8 @@ internal sealed unsafe class CharacterPreview : IDisposable
     private void Stop(string reason)
     {
         log.Warning(reason);
-        Close();
+        var failed=selectedDesign;
+        Close();selectedDesign=failed;
         status = reason;
         Release();
     }

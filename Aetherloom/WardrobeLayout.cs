@@ -12,12 +12,14 @@ internal record WardrobeDye(byte Id,string Name,uint Color,int Family)
 }
 internal record WardrobeStyle(byte Id,string Name,uint Icon);
 internal record WardrobeSlot(string Key,string Label,WardrobeItem Item,byte First,byte Second,bool Apply);
-internal sealed record LibraryDesign(Guid Id,string Name,string[] Tags,string Folder="",DateTimeOffset LastEdit=default);
+internal sealed record LibraryDesign(Guid Id,string Name,string[] Tags,string Folder="",DateTimeOffset LastEdit=default,ulong MainHand=0);
 internal static class WardrobeLibrary
 {
     internal static string StoredName(string parent,string label)=>parent.Length==0?"[AL] "+label:label;
     internal static string PathFor(string parent,string label)=>parent.Length==0?StoredName(parent,label):parent+"/"+label;
     internal static bool Within(string path,string ancestor)=>path==ancestor || path.StartsWith(ancestor+"/",StringComparison.Ordinal);
+    internal static bool VisibleTag(string tag)=>!string.Equals(tag,Tag,StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(tag,LegacyTag,StringComparison.OrdinalIgnoreCase);
     internal const string Tag="aetherloom";
     internal const string LegacyTag="ui-wardrobe";
     internal static bool Tagged(IEnumerable<string> tags,string tag)=>tags.Contains(tag,StringComparer.OrdinalIgnoreCase);
@@ -33,6 +35,8 @@ internal interface IWardrobe
     string Title { get; }
     string Message { get; }
     string[] Tags { get; }
+    IReadOnlyList<string> KnownTags {get;}
+    IEnumerable<string> JobTerms(Guid id);
     IEnumerable<WardrobeSlot> Slots(bool accessories);
     IEnumerable<WardrobeItem> Catalog(string slot);
     IEnumerable<WardrobeDye> Dyes { get; }
@@ -46,6 +50,8 @@ internal interface IWardrobe
     bool Create(string name,string folder);
     bool CreateFolder(string parent,string name);
     void MoveDesign(Guid id,string folder);
+    bool RenameDesign(Guid id,string name);
+    bool DeleteDesign(Guid id);
     bool RelocateFolder(string source,string parent,string name);
     bool DeleteFolder(string path);
     void Tag(string tag,bool add);
@@ -57,6 +63,7 @@ internal interface IWardrobe
     bool GroupEnabled(string group);
     void SetGroupEnabled(string group,bool enabled);
     IEnumerable<(uint Id,string Name)> AssignmentOptions(string type);
+    string? AssignmentOwner(string type,uint id);
     IReadOnlyCollection<uint> Assigned(string type);
     void Assign(string type,uint id,bool enabled);
     bool HasCharacter {get;}
@@ -65,7 +72,7 @@ internal interface IWardrobe
     bool? DisplayOption(string key);
     void ToggleDisplay(string key);
     void ResetCamera();
-    void PreviewOptions();
+    void WeaponSelector();
     void DrawPreview();
 }
 
@@ -96,7 +103,9 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         try {
         shell.Draw("Aetherloom","",[new Destination("wardrobe","Wardrobe","",Body)],(p,size)=>{
             if (wardrobe.HeaderMark is not {} mark) return;
-            ImGui.GetWindowDrawList().AddImage(mark,p,p+new Vector2(size));
+            // The source artwork occupies the middle 320 pixels of a 512-pixel canvas.
+            var margin=new Vector2(size*.10f);
+            ImGui.GetWindowDrawList().AddImage(mark,p-margin,p+new Vector2(size)+margin,new Vector2(.18f),new Vector2(.82f));
         });
         } finally { ImGui.PopStyleColor(6); }
     }
@@ -116,7 +125,6 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         if(ImGui.BeginChild("character-image",new Vector2(0,height),false,ImGuiWindowFlags.NoScrollbar|ImGuiWindowFlags.NoScrollWithMouse))
             wardrobe.DrawPreview();
         ImGui.EndChild();
-        if(ImGui.BeginPopupContextItem("preview-options",ImGuiPopupFlags.MouseButtonMiddle)){wardrobe.PreviewOptions();ImGui.EndPopup();}
         float right=ImGui.GetCursorPosX()+ImGui.GetContentRegionAvail().X-8*S;
         ImGui.SetCursorPosX(ImGui.GetCursorPosX()+8*S);
         foreach(var (key,label,paths) in PreviewActions)
@@ -148,9 +156,10 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
     private string folderName="";
     private readonly HashSet<string> expanded=[];
     private string contextFolder="";
+    private Guid contextDesign;
     private Vector2 contextPosition;
-    private enum FolderAction { Menu, Rename, Delete }
-    private FolderAction folderAction;
+    private enum LibraryAction { Menu, Rename, Delete }
+    private LibraryAction libraryAction;
     private bool focusName;
     private void Sidebar()
     {
@@ -188,13 +197,13 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
             }
             WorkspaceControls.EndPicker();
         }
-        ImGui.SetNextItemWidth(-1);ImGui.InputTextWithHint("##filter","Filter names or tags",ref filter,128);
+        ImGui.SetNextItemWidth(-1);ImGui.InputTextWithHint("##filter","Filter names, tags or jobs",ref filter,128);
         ImGui.Spacing();ImGui.Separator();
         if(WorkspaceControls.TreeRow("root","Wardrobe root",folder.Length==0,true))folder="";
         DropOn("");
         var terms=filter.Split(' ',StringSplitOptions.RemoveEmptyEntries);
         var designs=wardrobe.Designs.Where(d=>terms.All(word=>d.Name.Contains(word,StringComparison.OrdinalIgnoreCase)
-            || d.Tags.Any(t=>t.Contains(word,StringComparison.OrdinalIgnoreCase)))).OrderBy(d=>d.Name,StringComparer.OrdinalIgnoreCase)
+            || d.Tags.Any(t=>WardrobeLibrary.VisibleTag(t) && t.Contains(word,StringComparison.OrdinalIgnoreCase)) || wardrobe.JobTerms(d.Id).Any(j=>j.Contains(word,StringComparison.OrdinalIgnoreCase)))).OrderBy(d=>d.Name,StringComparer.OrdinalIgnoreCase)
             .ToLookup(d=>WardrobeLibrary.Managed(d.Folder)?d.Folder:"");
         var folders=wardrobe.Folders.Order(StringComparer.OrdinalIgnoreCase).ToLookup(WardrobeLibrary.Parent);
         var matches=new HashSet<string>();
@@ -203,8 +212,8 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
                 for(var ancestor=group.Key;ancestor.Length>0;ancestor=WardrobeLibrary.Parent(ancestor))matches.Add(ancestor);
         bool requestMenu=false;
         DrawBranch("");
-        if(requestMenu)ImGui.OpenPopup("folder-actions");
-        FolderMenu();
+        if(requestMenu)ImGui.OpenPopup("library-actions");
+        LibraryMenu();
         if(terms.Length>0 && !designs.Any())ImGui.TextDisabled("No matching designs.");
         void DrawBranch(string parent)
         {
@@ -219,8 +228,8 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
                 }
                 if(ImGui.IsItemClicked(ImGuiMouseButton.Right))
                 {
-                    contextFolder=child;folderName=WardrobeLibrary.Label(child);
-                    contextPosition=ImGui.GetMousePos();folderAction=FolderAction.Menu;requestMenu=true;
+                    contextDesign=Guid.Empty;contextFolder=child;folderName=WardrobeLibrary.Label(child);
+                    contextPosition=ImGui.GetMousePos();libraryAction=LibraryAction.Menu;requestMenu=true;
                 }
                 DragFolder(child);
                 DropOn(child);
@@ -230,30 +239,38 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
             {
                 if(WorkspaceControls.TreeRow(item.Id.ToString(),item.Name,item.Id==wardrobe.Selected,false))
                 {wardrobe.Select(item.Id);folder=parent;}
+                if(ImGui.IsItemClicked(ImGuiMouseButton.Right))
+                {
+                    contextDesign=item.Id;folderName=item.Name;contextPosition=ImGui.GetMousePos();
+                    libraryAction=LibraryAction.Menu;requestMenu=true;
+                }
                 Drag(item);
             }
         }
         if(wardrobe.Message.Length>0)ImGui.TextWrapped(wardrobe.Message);
     }
-    private void FolderMenu()
+    private void LibraryMenu()
     {
-        if(!WorkspaceControls.BeginPicker("folder-actions",220,168,contextPosition))return;
-        if(!wardrobe.Folders.Contains(contextFolder))ImGui.CloseCurrentPopup();
+        if(!WorkspaceControls.BeginPicker("library-actions",220,168,contextPosition))return;
+        bool isDesign=contextDesign!=Guid.Empty;
+        var entry=isDesign?wardrobe.Designs.FirstOrDefault(d=>d.Id==contextDesign):null;
+        if(isDesign?entry==null:!wardrobe.Folders.Contains(contextFolder))ImGui.CloseCurrentPopup();
         else
         {
-            var label=WardrobeLibrary.Label(contextFolder);
+            var label=entry?.Name??WardrobeLibrary.Label(contextFolder);
+            var kind=isDesign?"design":"folder";
             var parent=WardrobeLibrary.Parent(contextFolder);
-            WorkspaceControls.PickerHeading(folderAction switch{FolderAction.Rename=>"Rename folder",FolderAction.Delete=>"Delete folder",_=>label});
-            if(folderAction==FolderAction.Menu)
+            WorkspaceControls.PickerHeading(libraryAction switch{LibraryAction.Rename=>"Rename "+kind,LibraryAction.Delete=>"Delete "+kind,_=>label});
+            if(libraryAction==LibraryAction.Menu)
             {
-                if(ImGui.Selectable("Rename folder",false,ImGuiSelectableFlags.DontClosePopups))
-                    {folderAction=FolderAction.Rename;focusName=true;}
+                if(ImGui.Selectable("Rename "+kind,false,ImGuiSelectableFlags.DontClosePopups))
+                    {libraryAction=LibraryAction.Rename;focusName=true;}
                 ImGui.PushStyleColor(ImGuiCol.Text,new Vector4(.95f,.60f,.58f,1));
-                if(ImGui.Selectable("Delete folder",false,ImGuiSelectableFlags.DontClosePopups))
-                    folderAction=FolderAction.Delete;
+                if(ImGui.Selectable("Delete "+kind,false,ImGuiSelectableFlags.DontClosePopups))
+                    libraryAction=LibraryAction.Delete;
                 ImGui.PopStyleColor();
             }
-            else if(folderAction==FolderAction.Rename)
+            else if(libraryAction==LibraryAction.Rename)
             {
                 if(focusName){ImGui.SetKeyboardFocusHere();focusName=false;}
                 ImGui.SetNextItemWidth(-1);
@@ -262,13 +279,14 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
                 ImGui.BeginDisabled(name.Length==0);
                 bool save=ImGui.Button("Rename");
                 ImGui.EndDisabled();
-                if(name.Length>0 && (save||enter) && Relocate(contextFolder,parent,name))ImGui.CloseCurrentPopup();
+                if(name.Length>0 && (save||enter) && (isDesign?wardrobe.RenameDesign(contextDesign,name):Relocate(contextFolder,parent,name)))ImGui.CloseCurrentPopup();
                 ImGui.SameLine();if(ImGui.Button("Cancel"))ImGui.CloseCurrentPopup();
             }
             else
             {
-                ImGui.TextWrapped($"Delete {label}? Its designs and subfolders will move up one level.");
-                if(ImGui.Button("Delete") && wardrobe.DeleteFolder(contextFolder))
+                ImGui.TextWrapped(isDesign?$"Delete {label} from Glamourer and Aetherloom? Its saved assignments will also be removed."
+                    :$"Delete {label}? Its designs and subfolders will move up one level.");
+                if(ImGui.Button("Delete") && (isDesign?wardrobe.DeleteDesign(contextDesign):wardrobe.DeleteFolder(contextFolder)))
                 {
                     // Promoted children may acquire the managed prefix at the root.
                     string Promote(string path)
@@ -277,13 +295,13 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
                         var tail=path[(contextFolder.Length+1)..];
                         return parent.Length==0?"[AL] "+tail:parent+"/"+tail;
                     }
-                    Remap(contextFolder,Promote);
+                    if(!isDesign)Remap(contextFolder,Promote);
                     ImGui.CloseCurrentPopup();
                 }
                 ImGui.SameLine();if(ImGui.Button("Cancel"))ImGui.CloseCurrentPopup();
             }
         }
-        if(folderAction!=FolderAction.Menu && wardrobe.Message.Length>0)ImGui.TextWrapped(wardrobe.Message);
+        if(libraryAction!=LibraryAction.Menu && wardrobe.Message.Length>0)ImGui.TextWrapped(wardrobe.Message);
         WorkspaceControls.EndPicker();
     }
 
@@ -343,21 +361,42 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         Heading(wardrobe.Title);
         foreach(var jobs in wardrobe.Slots(false).Where(x=>x.Key.StartsWith("MainHand")).Select(x=>x.Item.Jobs).Where(x=>x.Length>0).Distinct())
         {ImGui.TextColored(new Vector4(.41f,.86f,.79f,1),jobs); ImGui.SameLine();}
-        foreach(var tag in wardrobe.Tags)
+        foreach(var tag in wardrobe.Tags.Where(WardrobeLibrary.VisibleTag))
         {
             if(ImGui.SmallButton(tag+"###tag"+tag)) ImGui.OpenPopup("tag"+tag);
             if(ImGui.BeginPopup("tag"+tag)){if(ImGui.MenuItem("Remove tag")) wardrobe.Tag(tag,false); ImGui.EndPopup();}
             ImGui.SameLine();
         }
-        if(ImGui.SmallButton("+ Tag")) ImGui.OpenPopup("add-tag");
-        if(ImGui.BeginPopup("add-tag"))
+        if(ImGui.SmallButton("+ Tag")){newTag="";ImGui.OpenPopup("add-tag");}
+        AutoOpen("add-tag","add-tag");
+        if(WorkspaceControls.BeginPicker("add-tag",248,275))
         {
-            ImGui.InputTextWithHint("##tag","Tag name",ref newTag,48);
-            if(newTag.Trim().Length>0 && ImGui.Button("Add")){wardrobe.Tag(newTag.Trim(),true);newTag="";ImGui.CloseCurrentPopup();}
-            ImGui.EndPopup();
+            WorkspaceControls.PickerHeading("Add tag");
+            if(ImGui.IsWindowAppearing())ImGui.SetKeyboardFocusHere();
+            ImGui.SetNextItemWidth(-1);
+            bool enter=ImGui.InputTextWithHint("##tag","Find or create a tag",ref newTag,80,ImGuiInputTextFlags.EnterReturnsTrue);
+            var typed=newTag.Trim();
+            var suggestions=wardrobe.KnownTags.Where(t=>WardrobeLibrary.VisibleTag(t) && !WardrobeLibrary.Tagged(wardrobe.Tags,t)
+                && t.Contains(typed,StringComparison.OrdinalIgnoreCase)).OrderByDescending(t=>t.StartsWith(typed,StringComparison.OrdinalIgnoreCase)).ToArray();
+            if(ImGui.BeginChild("suggestions",new Vector2(-1,Math.Clamp(suggestions.Length,1,5)*28*S)))
+            {
+                foreach(var match in suggestions)
+                    if(ImGui.Selectable(match,false,0,new Vector2(0,22*S))){wardrobe.Tag(match,true);ImGui.CloseCurrentPopup();}
+                if(suggestions.Length==0)ImGui.TextDisabled("No matching tags");
+            }
+            ImGui.EndChild();
+            bool valid=typed.Length>0 && WardrobeLibrary.VisibleTag(typed) && !WardrobeLibrary.Tagged(wardrobe.Tags,typed);
+            ImGui.BeginDisabled(!valid);
+            bool add=ImGui.Button("Add tag");
+            ImGui.EndDisabled();
+            if(valid && (enter||add))
+            {
+                var completion=enter?suggestions.FirstOrDefault():suggestions.FirstOrDefault(t=>t.Equals(typed,StringComparison.OrdinalIgnoreCase));
+                wardrobe.Tag(completion??typed,true);
+                ImGui.CloseCurrentPopup();
+            }
+            WorkspaceControls.EndPicker();
         }
-        ImGui.SameLine();if(ImGui.SmallButton("Preview options"))ImGui.OpenPopup("preview-menu");
-        if(ImGui.BeginPopup("preview-menu")){wardrobe.PreviewOptions();ImGui.EndPopup();}
         ImGui.Spacing();
         if(ImGui.BeginTabBar("wardrobe-tabs"))
         {
@@ -398,6 +437,7 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
 
     private void DrawEquipment(bool accessories)
     {
+        if(!accessories)wardrobe.WeaponSelector();
         var rows=wardrobe.Slots(accessories).ToArray();
         for(int i=0;i<rows.Length;i++)
         {
@@ -444,7 +484,8 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
             if(ImGui.Button(mode,new Vector2(segment,0))){itemFilter=mode;itemPage=0;}
             if(active)ImGui.PopStyleColor();
         }
-        ImGui.BeginChild("results",new Vector2(-1,275*S),false);
+        if(ImGui.Button("Empty slot",new Vector2(-1,0))){wardrobe.SetItem(slot.Key,0);ImGui.CloseCurrentPopup();}
+        ImGui.BeginChild("results",new Vector2(-1,205*S),false);
         int matches=0;
         foreach(var item in wardrobe.Catalog(slot.Key).Where(i=>i.Name.Contains(search,StringComparison.OrdinalIgnoreCase)))
         {
@@ -496,22 +537,55 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         if(!wardrobe.HasCharacter){ImGui.TextWrapped("Log in to manage character assignments.");return;}
         foreach(var type in new[]{"Jobs","Zones"})
         {
-            Heading(type);
+            ImGui.PushID(type);
+            bool jobs=type=="Jobs";
+            var options=wardrobe.AssignmentOptions(type);
             var assigned=wardrobe.Assigned(type);
-            if(ImGui.BeginCombo("##"+type,type=="Jobs"?"Assign job":"Assign zone"))
+            float right=ImGui.GetCursorPosX()+ImGui.GetContentRegionAvail().X;
+            ImGui.AlignTextToFramePadding();ImGui.TextUnformatted(type);ImGui.SameLine();
+            string edit=jobs?"Choose jobs":"Choose zones";
+            ImGui.SetCursorPosX(right-ImGui.CalcTextSize(edit).X-2*ImGui.GetStyle().FramePadding.X);
+            if(ImGui.Button(edit)){assignmentSearch="";ImGui.OpenPopup("choices");}
+            AutoOpen(type,"choices");
+            if(WorkspaceControls.BeginPicker("choices",328,360))
             {
-                if(ImGui.IsWindowAppearing())assignmentSearch="";
-                ImGui.InputTextWithHint("##find","Search",ref assignmentSearch,80);
-                foreach(var (id,name) in wardrobe.AssignmentOptions(type).Where(x=>x.Name.Contains(assignmentSearch,StringComparison.OrdinalIgnoreCase)))
-                    if(ImGui.Selectable(name+"###"+id,assigned.Contains(id)))wardrobe.Assign(type,id,true);
-                ImGui.EndCombo();
+                WorkspaceControls.PickerHeading(edit);
+                if(ImGui.IsWindowAppearing())ImGui.SetKeyboardFocusHere();
+                ImGui.SetNextItemWidth(-1);bool searched=ImGui.InputTextWithHint("##find",jobs?"Search jobs or abbreviations":"Search zones",ref assignmentSearch,80);
+                if(ImGui.BeginChild("options",new Vector2(-1,238*S)))
+                {
+                    if(searched)ImGui.SetScrollY(0);
+                    int count=0;
+                    foreach(var (id,name) in options.Where(x=>x.Name.Contains(assignmentSearch,StringComparison.OrdinalIgnoreCase)))
+                    {
+                        count++;
+                        var size=new Vector2(ImGui.GetContentRegionAvail().X,52*S);
+                        if(!ImGui.IsRectVisible(size)){ImGui.Dummy(size);continue;}
+                        bool active=assigned.Contains(id);
+                        string? owner=wardrobe.AssignmentOwner(type,id);
+                        if(WorkspaceControls.Tile("##"+id,name,active?"Assigned here":owner==null?"Available":"Assigned to "+owner,null,active,false,size.X))
+                            wardrobe.Assign(type,id,!active);
+                    }
+                    if(count==0)ImGui.TextDisabled("No matches");
+                }
+                ImGui.EndChild(); WorkspaceControls.EndPicker();
             }
-            if(assigned.Count>0)
-            foreach(var (id,name) in wardrobe.AssignmentOptions(type).Where(x=>assigned.Contains(x.Id)))
+            if(assigned.Count==0)ImGui.TextDisabled(jobs?"No jobs assigned":"No zones assigned");
+            foreach(var (id,name) in options.Where(x=>assigned.Contains(x.Id)))
             {
-                ImGui.TextUnformatted(name);ImGui.SameLine();
-                if(ImGui.SmallButton("Remove###"+type+id))wardrobe.Assign(type,id,false);
+                float width=ImGui.GetContentRegionAvail().X;
+                ImGui.SetNextItemWidth(width);
+                var origin=ImGui.GetCursorScreenPos();float side=24*S;
+                var dl=ImGui.GetWindowDrawList();
+                dl.AddRectFilled(origin,origin+new Vector2(width,side+8*S),0x80352d27u,4*S);
+                dl.PushClipRect(origin,origin+new Vector2(width-side-12*S,side+8*S),true);
+                dl.AddText(origin+new Vector2(9*S,(side+8*S-ImGui.GetTextLineHeight())/2),ImGui.GetColorU32(ImGuiCol.Text),name);
+                dl.PopClipRect();
+                ImGui.SetCursorScreenPos(origin+new Vector2(width-side-4*S,4*S));
+                if(WorkspaceControls.CloseButton("remove"+id,side,"Remove "+name))wardrobe.Assign(type,id,false);
+                ImGui.SetCursorScreenPos(origin);ImGui.Dummy(new Vector2(width,side+8*S));
             }
+            ImGui.PopID();
             ImGui.Spacing();ImGui.Separator();ImGui.Spacing();
         }
         ImGui.TextDisabled("Assignments are saved locally. Automatic application is pending.");
