@@ -1,1 +1,1 @@
-The Details tab now uses anchored wardrobe pickers for Designed for and Intended for, with clearer selection indicators and searchable, grouped roles and jobs.
+New Eorzea Collection imports automatically receive the Eorzea Collection tag in Aetherloom and Glamourer.

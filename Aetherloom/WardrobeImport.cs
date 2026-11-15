@@ -110,7 +110,7 @@ internal sealed class WardrobeImport
             }
         }
         if (items.Count==0) throw new FormatException("No matching equipment in this outfit. "+string.Join(", ",result.Warnings));
-        result.Plates.Add(new(SourceId("ec/"+id),Label(outfit["name"],"Eorzea Collection outfit"),"",[],items));
+        result.Plates.Add(new(SourceId("ec/"+id),Label(outfit["name"],"Eorzea Collection outfit"),"",["Eorzea Collection"],items));
         return result;
     }
 }

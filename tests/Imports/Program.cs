@@ -19,6 +19,8 @@ Check(WardrobeImport.CollectionId("https://ffxiv.eorzeacollection.com/glamour/12
 var ec=WardrobeImport.Collection(123,"""{"id":123,"name":"Set","gear":{"head":{"name":"My Hat","dyes":"none,opo-opo-brown"},"weapon":null,"body":{"name":"Missing"},"facewear":{"name":"Ignored"}}}""",
     (slot,name)=>slot=="Head" && name=="My Hat"?3u:null, dye=>dye=="opo opo brown"?(byte)7:null);
 Check(ec.Plates.Single().Items.Single().Value==new ImportedItem(3,0,7) && ec.Warnings.Count==1,"collection slots, issue reporting and second dye");
+Check(ec.Plates.Single().Tags.SequenceEqual(["Eorzea Collection"])
+    && WardrobeMetadata.Decode(ec.Plates.Single().Tags.Single()).Group==WardrobeMetadata.General,"collection imports get a freeform source tag");
 Console.WriteLine("Wardrobe import checks passed.");
 
 var metadata=new[]{"STYLE:Casual","Blue","Travel","gender:Female","intended:Bard"}.Select(WardrobeMetadata.Decode).ToArray();
