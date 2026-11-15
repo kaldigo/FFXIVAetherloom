@@ -257,9 +257,30 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     {
         if(library.ContainsKey(id) && Call(()=>plugin.GetIpcSubscriber<Guid,string,string>(Api+"MoveDesign").InvokeFunc(id,folder)))Refresh();
     }
-    public void Tag(string tag,bool add)
+    public void EditTags(string[] remove,string? add)
     {
-        if(Call(()=>SetTag(Selected,tag,add)))Refresh();
+        var id=Selected;
+        if(!library.TryGetValue(id,out var original))return;
+        bool adding=add!=null && !WardrobeLibrary.Tagged(original.Tags,add);
+        if(adding && !Call(()=>SetTag(id,add!,true)))return;
+        var removed=new List<string>();
+        var error="";
+        foreach(var raw in remove.Where(WardrobeLibrary.VisibleTag).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if(string.Equals(raw,add,StringComparison.OrdinalIgnoreCase))continue;
+            if(Call(()=>SetTag(id,raw,false))){removed.Add(raw);continue;}
+            error=Message;
+            foreach(var prior in removed)Call(()=>SetTag(id,prior,true));
+            if(adding)Call(()=>SetTag(id,add!,false));
+            break;
+        }
+        Refresh();
+        if(Plans[id.ToString()] is JObject local && library.TryGetValue(id,out var entry))
+        {
+            local["Tags"]=new JArray(entry.Tags);
+            Write();
+        }
+        if(error.Length>0)Message=error;
     }
     private JObject Equipment=>(JObject)(design["Equipment"]??=new JObject());
     private JObject Look=>(JObject)(design["Customize"]??=new JObject());
@@ -281,7 +302,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     private Dictionary<string,string[]>? jobNames;
     private ulong searchCharacter;
     private Dictionary<Guid,List<string>>? assignedJobTerms;
-    public IEnumerable<string> JobTerms(Guid id)
+    public IEnumerable<string> WeaponTerms(Guid id)
     {
         if(!weaponJobTerms.TryGetValue(id,out var terms))
         {
@@ -297,6 +318,11 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
                 .SelectMany(abbr=>(jobNames.GetValueOrDefault(abbr)??[]).Prepend(abbr)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             weaponJobTerms[id]=terms;
         }
+        return terms;
+    }
+    public IEnumerable<string> JobTerms(Guid id)
+    {
+        var terms=WeaponTerms(id);
         if(!HasCharacter)return terms;
         if(assignedJobTerms==null || searchCharacter!=ownership.Character)
         {

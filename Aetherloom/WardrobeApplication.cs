@@ -4,10 +4,13 @@ namespace Aetherloom;
 
 internal static class WardrobeApplication
 {
-    internal static JObject Build(JObject currentGear,JObject currentLook,JObject equipment,JObject appearance,
+    internal static JObject BuildPlan(JObject currentGear,JObject currentLook,JObject plan,
         IEnumerable<string> slots,IEnumerable<string> fields,JObject? main,Func<ulong,bool> eligible,
         List<string> skipped,out bool applyLook)
     {
+        var equipment=(JObject)plan["Equipment"]!;
+        var appearance=(JObject)plan["Customize"]!;
+        bool bypass=plan.Value<bool>("BypassOwnership");
         var gear=new JObject();
         foreach(var key in slots)
         {
@@ -17,7 +20,7 @@ internal static class WardrobeApplication
                 gear[key]=new JObject { ["ItemId"]=weapon["ItemId"]!.DeepClone() };
             if(slot==null || !(slot.Value<bool>("Apply") || slot.Value<bool>("ApplyStain")))continue;
             var id=slot.Value<ulong>("ItemId");
-            if(!eligible(id)){skipped.Add(key);continue;}
+            if(!bypass && !eligible(id)){skipped.Add(key);continue;}
             var item=(JObject)slot.DeepClone();
             item.Remove("ApplyCrest");
             gear[key]=item;

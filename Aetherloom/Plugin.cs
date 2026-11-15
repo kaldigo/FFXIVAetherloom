@@ -13,6 +13,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly WindowSystem windows = new("Aetherloom");
     private readonly CharacterPreview preview;
     private readonly WardrobeWindow window;
+    private readonly WardrobeAssignments assignments;
 
     public Plugin(IDalamudPluginInterface plugin, ICommandManager commands, IFramework framework,
         IPlayerState player, IClientState client, IDataManager data, IPluginLog log,
@@ -24,6 +25,7 @@ public sealed class Plugin : IDalamudPlugin
         preview = new(framework, gameGui, conditions, objects, addons, log, data, textures);
         window = new(plugin, data, ownership, preview, textures, objects);
         plugin.GetIpcProvider<uint[]>(WardrobeWindow.DesignItemEndpoint).RegisterFunc(window.GetDesignItemIds);
+        assignments=new(window,framework,client,objects,conditions,log,plugin);
         windows.AddWindow(window);
         plugin.UiBuilder.Draw += windows.Draw;
         plugin.UiBuilder.OpenMainUi += Open;
@@ -42,6 +44,7 @@ public sealed class Plugin : IDalamudPlugin
         plugin.UiBuilder.OpenMainUi -= Open;
         plugin.UiBuilder.Draw -= windows.Draw;
         windows.RemoveAllWindows();
+        assignments.Dispose();
         window.DisposeImports();
         preview.Dispose();
         ownership.Dispose();

@@ -20,3 +20,23 @@ var ec=WardrobeImport.Collection(123,"""{"id":123,"name":"Set","gear":{"head":{"
     (slot,name)=>slot=="Head" && name=="My Hat"?3u:null, dye=>dye=="opo opo brown"?(byte)7:null);
 Check(ec.Plates.Single().Items.Single().Value==new ImportedItem(3,0,7) && ec.Warnings.Count==1,"collection slots, issue reporting and second dye");
 Console.WriteLine("Wardrobe import checks passed.");
+
+var metadata=new[]{"STYLE:Casual","Blue","Travel","gender:Female","intended:Bard"}.Select(WardrobeMetadata.Decode).ToArray();
+Check(metadata[0].Group=="Style" && metadata[1].Group=="Color" && metadata[2].Group=="Tags","prefixed and legacy tags");
+foreach(var value in new[]{"Casual","style:Custom","tag:Travel","My tag"})
+{
+    var decoded=WardrobeMetadata.Decode(WardrobeMetadata.Encode("Tags",value));
+    Check(decoded.Group=="Tags" && decoded.Value==value,"freeform tag round trip");
+}
+Check(WardrobeMetadata.Single(WardrobeMetadata.Gender,[])=="Unspecified" &&
+    WardrobeMetadata.Single(WardrobeMetadata.Intended,[])=="All Classes","unclassified design defaults");
+Check(WardrobeMetadata.ContainsText("Bard","brd") && WardrobeMetadata.ContainsText("Beastmaster","bst"),"job abbreviation lookup");
+var filters=WardrobeMetadata.Filters.ToDictionary(g=>g,_=>new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+filters["Color"].UnionWith(["Red","blue"]);
+filters["Style"].Add("Casual");
+filters[WardrobeMetadata.Weapon].Add("Dancer");
+Check(WardrobeMetadata.Matches(metadata,filters,()=>["Gunbreaker","Dancer"]),"any value per category and alternate main hand");
+Check(!WardrobeMetadata.Matches(metadata,filters,()=>["Bard"]),"weapon filter uses configured weapons");
+filters["Style"].Clear();filters["Style"].Add("Vintage");
+Check(!WardrobeMetadata.Matches(metadata,filters,()=>["Dancer"]),"all active categories must match");
+Console.WriteLine("Wardrobe metadata checks passed.");

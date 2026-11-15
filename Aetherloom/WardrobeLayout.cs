@@ -12,7 +12,11 @@ internal record WardrobeDye(byte Id,string Name,uint Color,int Family)
 }
 internal record WardrobeStyle(byte Id,string Name,uint Icon);
 internal record WardrobeSlot(string Key,string Label,WardrobeItem Item,byte First,byte Second,bool Apply);
-internal sealed record LibraryDesign(Guid Id,string Name,string[] Tags,string Folder="",DateTimeOffset LastEdit=default,ulong MainHand=0);
+internal sealed record LibraryDesign(Guid Id,string Name,string[] Tags,string Folder="",DateTimeOffset LastEdit=default,ulong MainHand=0)
+{
+    private WardrobeTag[]? metadata;
+    public WardrobeTag[] Metadata=>metadata??=Tags.Where(WardrobeLibrary.VisibleTag).Select(WardrobeMetadata.Decode).ToArray();
+}
 internal static class WardrobeLibrary
 {
     internal static string StoredName(string parent,string label)=>parent.Length==0?"[AL] "+label:label;
@@ -37,6 +41,7 @@ internal interface IWardrobe
     string[] Tags { get; }
     IReadOnlyList<string> KnownTags {get;}
     IEnumerable<string> JobTerms(Guid id);
+    IEnumerable<string> WeaponTerms(Guid id);
     IEnumerable<WardrobeSlot> Slots(bool accessories);
     IEnumerable<WardrobeItem> Catalog(string slot);
     IEnumerable<WardrobeDye> Dyes { get; }
@@ -58,7 +63,7 @@ internal interface IWardrobe
     bool DeleteDesign(Guid id);
     bool RelocateFolder(string source,string parent,string name);
     bool DeleteFolder(string path);
-    void Tag(string tag,bool add);
+    void EditTags(string[] remove,string? add);
     void SetItem(string key,uint id);
     void SetDye(string key,int channel,byte dye);
     void SetApply(string key,bool apply);
@@ -82,7 +87,7 @@ internal interface IWardrobe
     void DrawPreview();
 }
 
-internal sealed class WardrobeLayout(IWardrobe wardrobe)
+internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
 {
     private readonly WindowShell shell=new(){ShowIconRail=false,ShowPageHeading=false,EdgeToEdgeBody=true};
     private string importUrl="";
@@ -93,7 +98,7 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
     private int family;
     private int itemPage;
     private string assignmentSearch="";
-    private static readonly string[] Tabs=["Gear","Accessories","Appearance","Assignments"];
+    private static readonly string[] Tabs=["Gear","Accessories","Appearance","Details","Assignments"];
     private static readonly uint[] Families=[0xffececec,0xff3030be,0xff4285aa,0xff55ddeb,0xff539d65,0xffd98861,0xffc075a1,0xffbba180];
     private static float S=>WorkspaceControls.Scale;
 
@@ -152,12 +157,6 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         }
     }
 
-    private static void Heading(string text)
-    {
-        ImGui.SetWindowFontScale(1.4f); ImGui.TextUnformatted(text); ImGui.SetWindowFontScale(1);
-        ImGui.Dummy(new Vector2(0,5*S));
-    }
-
     private Guid revealed;
     private string folder="";
     private string folderName="";
@@ -170,7 +169,7 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
     private bool focusName;
     private void Sidebar()
     {
-        Heading("Wardrobe");
+
         if(revealed!=wardrobe.Selected)
         {
             revealed=wardrobe.Selected;
@@ -179,12 +178,7 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
             for(var current=folder;current.Length>0;current=WardrobeLibrary.Parent(current))expanded.Add(current);
         }
         if(!wardrobe.Folders.Contains(folder))folder="";
-        float buttonWidth=(ImGui.GetContentRegionAvail().X-2*ImGui.GetStyle().ItemSpacing.X)/3;
-        if(ImGui.Button("+ Design",new Vector2(buttonWidth,30*S))){newName="";ImGui.OpenPopup("new-design");}
-        ImGui.SameLine();
-        if(ImGui.Button("+ Folder",new Vector2(buttonWidth,30*S))){folderName="";ImGui.OpenPopup("new-folder");}
-        ImGui.SameLine();
-        if(ImGui.Button("Import",new Vector2(-1,30*S)))ImGui.OpenPopup("wardrobe-import");
+        SidebarActions();
         AutoOpen("import","wardrobe-import");
         if(WorkspaceControls.BeginPicker("wardrobe-import",344,300))
         {
@@ -224,30 +218,29 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
             }
             WorkspaceControls.EndPicker();
         }
-        ImGui.SetNextItemWidth(-1);ImGui.InputTextWithHint("##filter","Filter names, tags or jobs",ref filter,128);
+        var matching=SearchAndFilters();
+        bool filtering=!string.IsNullOrWhiteSpace(filter) || FilterCount>0;
         ImGui.Spacing();ImGui.Separator();
         if(WorkspaceControls.TreeRow("root","Wardrobe root",folder.Length==0,true))folder="";
         DropOn("");
-        var terms=filter.Split(' ',StringSplitOptions.RemoveEmptyEntries);
-        var designs=wardrobe.Designs.Where(d=>terms.All(word=>d.Name.Contains(word,StringComparison.OrdinalIgnoreCase)
-            || d.Tags.Any(t=>WardrobeLibrary.VisibleTag(t) && t.Contains(word,StringComparison.OrdinalIgnoreCase)) || wardrobe.JobTerms(d.Id).Any(j=>j.Contains(word,StringComparison.OrdinalIgnoreCase)))).OrderBy(d=>d.Name,StringComparer.OrdinalIgnoreCase)
+        var designs=matching.OrderBy(d=>d.Name,StringComparer.OrdinalIgnoreCase)
             .ToLookup(d=>WardrobeLibrary.Managed(d.Folder)?d.Folder:"");
         var folders=wardrobe.Folders.Order(StringComparer.OrdinalIgnoreCase).ToLookup(WardrobeLibrary.Parent);
         var matches=new HashSet<string>();
-        if(terms.Length!=0)
+        if(filtering)
             foreach(var group in designs)
                 for(var ancestor=group.Key;ancestor.Length>0;ancestor=WardrobeLibrary.Parent(ancestor))matches.Add(ancestor);
         bool requestMenu=false;
         DrawBranch("");
         if(requestMenu)ImGui.OpenPopup("library-actions");
         LibraryMenu();
-        if(terms.Length>0 && !designs.Any())ImGui.TextDisabled("No matching designs.");
+        if(filtering && !designs.Any())ImGui.TextDisabled("No matching designs.");
         void DrawBranch(string parent)
         {
             foreach(var child in folders[parent])
             {
-                if(terms.Length>0 && !matches.Contains(child))continue;
-                var open=terms.Length>0||expanded.Contains(child);
+                if(filtering && !matches.Contains(child))continue;
+                var open=filtering||expanded.Contains(child);
                 if(WorkspaceControls.TreeRow("folder/"+child,WardrobeLibrary.Label(child),folder==child,true,open))
                 {
                     folder=child;
@@ -409,44 +402,7 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         if(bypass!=wardrobe.BypassOwnership)wardrobe.BypassOwnership=bypass;
         if(ImGui.IsItemHovered())ImGui.SetTooltip("Allow missing or unconfirmed gear when applying this design to your character.");
         ImGui.Dummy(new Vector2(0,5*S));
-        foreach(var jobs in wardrobe.Slots(false).Where(x=>x.Key.StartsWith("MainHand")).Select(x=>x.Item.Jobs).Where(x=>x.Length>0).Distinct())
-        {ImGui.TextColored(new Vector4(.41f,.86f,.79f,1),jobs); ImGui.SameLine();}
-        foreach(var tag in wardrobe.Tags.Where(WardrobeLibrary.VisibleTag))
-        {
-            if(ImGui.SmallButton(tag+"###tag"+tag)) ImGui.OpenPopup("tag"+tag);
-            if(ImGui.BeginPopup("tag"+tag)){if(ImGui.MenuItem("Remove tag")) wardrobe.Tag(tag,false); ImGui.EndPopup();}
-            ImGui.SameLine();
-        }
-        if(ImGui.SmallButton("+ Tag")){newTag="";ImGui.OpenPopup("add-tag");}
-        AutoOpen("add-tag","add-tag");
-        if(WorkspaceControls.BeginPicker("add-tag",248,275))
-        {
-            WorkspaceControls.PickerHeading("Add tag");
-            if(ImGui.IsWindowAppearing())ImGui.SetKeyboardFocusHere();
-            ImGui.SetNextItemWidth(-1);
-            bool enter=ImGui.InputTextWithHint("##tag","Find or create a tag",ref newTag,80,ImGuiInputTextFlags.EnterReturnsTrue);
-            var typed=newTag.Trim();
-            var suggestions=wardrobe.KnownTags.Where(t=>WardrobeLibrary.VisibleTag(t) && !WardrobeLibrary.Tagged(wardrobe.Tags,t)
-                && t.Contains(typed,StringComparison.OrdinalIgnoreCase)).OrderByDescending(t=>t.StartsWith(typed,StringComparison.OrdinalIgnoreCase)).ToArray();
-            if(ImGui.BeginChild("suggestions",new Vector2(-1,Math.Clamp(suggestions.Length,1,5)*28*S)))
-            {
-                foreach(var match in suggestions)
-                    if(ImGui.Selectable(match,false,0,new Vector2(0,22*S))){wardrobe.Tag(match,true);ImGui.CloseCurrentPopup();}
-                if(suggestions.Length==0)ImGui.TextDisabled("No matching tags");
-            }
-            ImGui.EndChild();
-            bool valid=typed.Length>0 && WardrobeLibrary.VisibleTag(typed) && !WardrobeLibrary.Tagged(wardrobe.Tags,typed);
-            ImGui.BeginDisabled(!valid);
-            bool add=ImGui.Button("Add tag");
-            ImGui.EndDisabled();
-            if(valid && (enter||add))
-            {
-                var completion=enter?suggestions.FirstOrDefault():suggestions.FirstOrDefault(t=>t.Equals(typed,StringComparison.OrdinalIgnoreCase));
-                wardrobe.Tag(completion??typed,true);
-                ImGui.CloseCurrentPopup();
-            }
-            WorkspaceControls.EndPicker();
-        }
+        TagSummary();
         ImGui.Spacing();
         if(ImGui.BeginTabBar("wardrobe-tabs"))
         {
@@ -466,6 +422,7 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
                     StyleRow("FacePaint","Pattern"); AppearanceColor("FacePaintColor","Paint color");
                     Toggle("FacePaintReversed","Mirror");
                 }
+                else if(tab=="Details") DrawDetails();
                 else if(tab=="Assignments") DrawAssignments();
                 else DrawEquipment(tab=="Accessories");
                 ImGui.EndTabItem();
@@ -639,7 +596,7 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
             ImGui.PopID();
             ImGui.Spacing();ImGui.Separator();ImGui.Spacing();
         }
-        ImGui.TextDisabled("Assignments are saved locally. Automatic application is pending.");
+        ImGui.TextDisabled("Zone assignments take priority over the current job.");
     }
     private void GroupSwitch(string group)
     {
