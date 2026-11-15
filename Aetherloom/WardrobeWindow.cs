@@ -380,6 +380,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
             yield return new(key,Labels.GetValueOrDefault(key.Split('/')[0],key),Resolve(slot.Value<ulong>("ItemId")),slot.Value<byte>("Stain"),slot.Value<byte>("Stain2"),slot.Value<bool>("Apply"));
         }
     }
+    public object OwnershipSnapshot=>ownership.Snapshot;
     public IEnumerable<WardrobeItem> Catalog(string key)
     {
         var slot=key.Split('/')[0];

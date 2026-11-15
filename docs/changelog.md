@@ -1,1 +1,1 @@
-Wardrobe previews clear the worn Aetherloom outfit’s tracked character appearance before applying the previewed design and its linked base. This includes hair, highlights, face paint, lip colour and linked character customization. Later external appearance edits are preserved.
+Browse all matching gear and accessories in one continuously scrollable list. The larger picker keeps search and ownership filters in view and loads icons for the visible rows.

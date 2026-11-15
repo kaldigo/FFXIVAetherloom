@@ -45,6 +45,7 @@ internal interface IWardrobe
     bool Wearable(Guid id);
     IEnumerable<WardrobeSlot> Slots(bool accessories);
     IEnumerable<WardrobeItem> Catalog(string slot);
+    object OwnershipSnapshot {get;}
     IEnumerable<WardrobeDye> Dyes { get; }
     IEnumerable<WardrobeStyle> Styles(string key);
     bool SupportsLipColor {get;}
@@ -106,7 +107,8 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
     internal string? OpenPicker;
     private string itemFilter="All";
     private int family;
-    private int itemPage;
+    private WardrobeItem[] gearResults=[];
+    private object? resultOwnership;
     private string assignmentSearch="";
     private static readonly string[] Tabs=["Gear","Accessories","Appearance","Details","Assignments"];
     private static readonly uint[] Families=[0xffececec,0xff3030be,0xff4285aa,0xff55ddeb,0xff539d65,0xffd98861,0xffc075a1,0xffbba180];
@@ -532,7 +534,7 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
             var width=ImGui.GetContentRegionAvail().X;
             var bodyWidth=width-(30*slot.Item.Channels+34)*S-ImGui.GetStyle().ItemSpacing.X*(slot.Item.Channels+1);
             if(WorkspaceControls.Tile("item",slot.Item.Name,slot.Label+(source.Length>0?"  ·  "+source:""),wardrobe.Icon(slot.Item.Icon),false,source=="Missing",bodyWidth))
-            {search="";itemFilter="All";itemPage=0;ImGui.OpenPopup("items");}
+            {search="";itemFilter="All";ImGui.OpenPopup("items");}
             AutoOpen(slot.Key,"items"); GearPicker(slot);
             for(int channel=0;channel<slot.Item.Channels;channel++)
             {
@@ -557,35 +559,58 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
     private void AutoOpen(string key,string popup){if(OpenPicker==key){ImGui.OpenPopup(popup);OpenPicker=null;}}
     private void GearPicker(WardrobeSlot slot)
     {
-        if(!WorkspaceControls.BeginPicker("items",346,435))return;
+        float popupHeight=Math.Min(600,ImGui.GetWindowViewport().WorkSize.Y/S);
+        if(!WorkspaceControls.BeginPicker("items",390,popupHeight))return;
+        bool reset=ImGui.IsWindowAppearing();
         WorkspaceControls.PickerHeading("Select "+slot.Label.ToLowerInvariant()+" gear");
         ImGui.TextDisabled(wardrobe.Title);
-        ImGui.SetNextItemWidth(-1);if(ImGui.InputTextWithHint("##search","Search "+slot.Label.ToLowerInvariant()+" gear",ref search,100))itemPage=0;
+        ImGui.SetNextItemWidth(-1);
+        reset|=ImGui.InputTextWithHint("##search","Search "+slot.Label.ToLowerInvariant()+" gear",ref search,100);
         float segment=(ImGui.GetContentRegionAvail().X-2*ImGui.GetStyle().ItemSpacing.X)/3;
         foreach(var mode in new[]{"All","Owned","Missing"})
         {
             if(mode!="All")ImGui.SameLine();
             bool active=itemFilter==mode;
             if(active)ImGui.PushStyleColor(ImGuiCol.Button,new Vector4(.12f,.42f,.40f,1));
-            if(ImGui.Button(mode,new Vector2(segment,0))){itemFilter=mode;itemPage=0;}
+            if(ImGui.Button(mode,new Vector2(segment,0)) && !active){itemFilter=mode;reset=true;}
             if(active)ImGui.PopStyleColor();
         }
         if(ImGui.Button("Empty slot",new Vector2(-1,0))){wardrobe.SetItem(slot.Key,0);ImGui.CloseCurrentPopup();}
-        ImGui.BeginChild("results",new Vector2(-1,205*S),false);
-        int matches=0;
-        foreach(var item in wardrobe.Catalog(slot.Key).Where(i=>i.Name.Contains(search,StringComparison.OrdinalIgnoreCase)))
+        var ownership=wardrobe.OwnershipSnapshot;
+        if(reset || (itemFilter!="All" && !ReferenceEquals(ownership,resultOwnership)))
         {
-            var status=wardrobe.Availability(item.Id);
-            if(itemFilter=="Missing"&&status!="Missing" || itemFilter=="Owned" && status is "Missing" or "Unconfirmed" or "Event / Mog Station exemption")continue;
-            if(matches++<itemPage*24)continue;
-            if(matches>24*(itemPage+1))break;
-            if(WorkspaceControls.Tile("##"+item.Id,item.Name,status,wardrobe.Icon(item.Icon),slot.Item.Id==item.Id,status=="Missing",ImGui.GetContentRegionAvail().X))
-            {wardrobe.SetItem(slot.Key,item.Id);ImGui.CloseCurrentPopup();}
+            var catalog=wardrobe.Catalog(slot.Key).Where(i=>i.Name.Contains(search,StringComparison.OrdinalIgnoreCase));
+            gearResults=itemFilter switch
+            {
+                "Missing"=>catalog.Where(i=>wardrobe.Availability(i.Id)=="Missing").ToArray(),
+                "Owned"=>catalog.Where(i=>wardrobe.Availability(i.Id) is not ("Missing" or "Unconfirmed" or "Event / Mog Station exemption")).ToArray(),
+                _=>catalog.ToArray()
+            };
+            resultOwnership=ownership;
         }
-        if(matches==0)ImGui.TextDisabled("No matching gear.");
+        // Give the scrollbar the full catalogue height, but only request icons for visible tiles.
+        float stride=52*S+ImGui.GetStyle().ItemSpacing.Y;
+        float height=Math.Min(Math.Max(60,popupHeight-183)*S,Math.Max(1,gearResults.Length)*stride);
+        ImGui.SetNextWindowContentSize(new Vector2(0,gearResults.Length*stride));
+        uint? chosen=null;
+        if(ImGui.BeginChild("results",new Vector2(-1,height),false))
+        {
+            if(reset)ImGui.SetScrollY(0);
+            int first=Math.Clamp((int)(ImGui.GetScrollY()/stride)-1,0,gearResults.Length);
+            int end=Math.Min(gearResults.Length,first+(int)Math.Ceiling(height/stride)+3);
+            if(first<end)
+                ImGui.SetCursorPosY(ImGui.GetCursorPosY()+first*stride);
+            for(int i=first;i<end;i++)
+            {
+                var item=gearResults[i];
+                var status=wardrobe.Availability(item.Id);
+                if(WorkspaceControls.Tile("##"+item.Id,item.Name,status,wardrobe.Icon(item.Icon),slot.Item.Id==item.Id,status=="Missing",ImGui.GetContentRegionAvail().X))
+                    chosen=item.Id;
+            }
+            if(gearResults.Length==0)ImGui.TextDisabled("No matching gear.");
+        }
         ImGui.EndChild();
-        if(itemPage>0 && ImGui.SmallButton("Previous"))itemPage--;
-        if(matches>24*(itemPage+1) && ImGui.SmallButton("Next"))itemPage++;
+        if(chosen is {} id){wardrobe.SetItem(slot.Key,id);ImGui.CloseCurrentPopup();}
         WorkspaceControls.EndPicker();
     }
     private void DyePicker(WardrobeSlot slot,int channel,string popup)

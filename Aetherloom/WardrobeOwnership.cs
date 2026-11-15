@@ -53,6 +53,7 @@ public sealed class WardrobeOwnership : IDisposable
 
     public ulong Character => _client.IsLoggedIn && _player.ContentId == _character ? _character : 0;
 
+    internal object Snapshot=>_snapshot;
     public string Availability(uint itemId) => _snapshot.Availability(itemId, _exceptions.Contains(itemId), Character != 0);
 
     private static unsafe HashSet<uint>? ReadContainers(InventoryType[] types)
