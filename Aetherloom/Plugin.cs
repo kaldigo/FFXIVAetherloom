@@ -23,6 +23,7 @@ public sealed class Plugin : IDalamudPlugin
         ownership = new(framework, player, client, plugin, data, log);
         preview = new(framework, gameGui, conditions, objects, addons, log, data, textures);
         window = new(plugin, data, ownership, preview, textures, objects);
+        plugin.GetIpcProvider<uint[]>(WardrobeWindow.DesignItemEndpoint).RegisterFunc(window.GetDesignItemIds);
         windows.AddWindow(window);
         plugin.UiBuilder.Draw += windows.Draw;
         plugin.UiBuilder.OpenMainUi += Open;
@@ -36,6 +37,7 @@ public sealed class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        plugin.GetIpcProvider<uint[]>(WardrobeWindow.DesignItemEndpoint).UnregisterFunc();
         commands.RemoveHandler("/aetherloom");
         plugin.UiBuilder.OpenMainUi -= Open;
         plugin.UiBuilder.Draw -= windows.Draw;

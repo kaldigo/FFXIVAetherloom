@@ -168,6 +168,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     }
     private void Write()
     {
+        referenceSnapshot=null;
         saved["Plans"]=Plans;saved["Assignments"]=assignments;
         try{Directory.CreateDirectory(Path.GetDirectoryName(file)!);File.WriteAllText(file+".tmp",saved.ToString());File.Move(file+".tmp",file,true);Message="";}
         catch(IOException){Message="Could not save the wardrobe edit to disk.";}
