@@ -47,6 +47,7 @@ internal interface IWardrobe
     IEnumerable<WardrobeItem> Catalog(string slot);
     IEnumerable<WardrobeDye> Dyes { get; }
     IEnumerable<WardrobeStyle> Styles(string key);
+    bool SupportsLipColor {get;}
     byte Style(string key);
     uint AppearanceColor(string key,byte value);
     Picture? Icon(uint icon);
@@ -489,6 +490,13 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
                             GroupSwitch("Face paint");
                             StyleRow("FacePaint","Pattern"); AppearanceColor("FacePaintColor","Paint color");
                             Toggle("FacePaintReversed","Mirror");
+                            ImGui.Separator();
+                            if(wardrobe.SupportsLipColor)
+                            {
+                                GroupSwitch("Lip color");
+                                AppearanceColor("LipColor","Lip shade");
+                            }
+                            else ImGui.TextDisabled("Lip color is unavailable for this appearance.");
                         }
                         else if(tab=="Details") DrawDetails();
                         else if(tab=="Assignments") DrawAssignments();
@@ -741,11 +749,11 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         ImGui.TextUnformatted(title);ImGui.SameLine();
         if(WorkspaceControls.Swatch("##"+key,wardrobe.AppearanceColor(key,chosen),title))ImGui.OpenPopup(key);
         AutoOpen(key,key);
-        if(!WorkspaceControls.BeginPicker(key,310,430))return;
+        if(!WorkspaceControls.BeginPicker(key,310,485))return;
         WorkspaceControls.PickerHeading(title);
         for(int i=0;i<192;i++)
         {
-            var id=(byte)(i+(key=="FacePaintColor" && i>=96?32:0));
+            var id=(byte)(i+((key is "FacePaintColor" or "LipColor") && i>=96?32:0));
             if(i%12!=0)ImGui.SameLine(0,3*S);
             if(WorkspaceControls.Swatch("##"+id,wardrobe.AppearanceColor(key,id),id.ToString(),id==chosen,20))
             {wardrobe.SetStyle(key,id);ImGui.CloseCurrentPopup();}

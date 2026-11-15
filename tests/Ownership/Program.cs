@@ -141,3 +141,12 @@ var edited=(JObject)actual.DeepClone();edited["Face"]!["Value"]=4;
 var withoutBase=new JObject{["Equipment"]=new JObject(),["Customize"]=new JObject()};
 Demand(WardrobeApplication.PlanRestoration(tracked,withoutBase,new(),edited,true,RealGear,trackedFields,out var afterEdit,out _) && withoutBase["Customize"]!["Face"]==null && afterEdit["Face"]==null,"Preserve a later external edit while clearing the old link");
 Console.WriteLine("Linked appearance layering and restoration checks passed.");
+
+var lips=new JObject{["Value"]=173,["Apply"]=true};
+var baseMakeup=JObject.Parse("""{"LipColor":{"Value":8,"Apply":true},"Lipstick":{"Value":0,"Apply":true}}""");
+var painted=WardrobeBase.WithLipColor(baseMakeup,lips,1,null);
+Demand((int?)painted["LipColor"]?["Value"]==173 && (int?)painted["Lipstick"]?["Value"]==128,"Apply light lip shade over a linked appearance");
+Demand(ReferenceEquals(WardrobeBase.WithLipColor(baseMakeup,null,1,null),baseMakeup),"An existing outfit inherits its base makeup");
+var fur=WardrobeBase.Compose(JObject.Parse("""{"Clan":{"Value":13,"Apply":true},"LipColor":{"Value":3,"Apply":true}}"""),new());
+Demand(ReferenceEquals(WardrobeBase.WithLipColor(fur,lips,1,null),fur),"A linked Hrothgar appearance keeps its fur pattern");
+Console.WriteLine("Lip shade composition checks passed.");

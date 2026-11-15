@@ -50,6 +50,18 @@ internal static class WardrobeBase
         value=current;return false;
     }
 
+    // Hrothgar use the lip colour byte for their fur pattern. Preserve the linked base there.
+    internal static JObject WithLipColor(JObject look,JObject? shade,byte race,JObject? previous)
+    {
+        if(shade?.Value<bool>("Apply")!=true)return look;
+        TryValue("Race",race,0xff,look,previous,out var targetRace);
+        if(targetRace is 0 or 7)return look;
+        var result=(JObject)look.DeepClone();
+        result["LipColor"]=shade.DeepClone();
+        result["Lipstick"]=new JObject{["Value"]=128,["Apply"]=true};
+        return result;
+    }
+
     internal static JObject Compose(JObject? baseLook,JObject outfit)
     {
         var result=new JObject();

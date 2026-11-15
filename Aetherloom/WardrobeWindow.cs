@@ -440,9 +440,15 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         return styles[cache]=entries.DistinctBy(x=>x.Id).ToArray();
     }
     private static string[] Fields(string group)=>group=="Hair" ? ["Hairstyle","HairColor","Highlights","HighlightsColor"] : ["FacePaint","FacePaintColor","FacePaintReversed"];
-    public bool GroupEnabled(string group)=>Fields(group).Any(k=>Look[k]?.Value<bool>("Apply")==true);
+    public unsafe bool SupportsLipColor=>objects.LocalPlayer is {} player && EditorAppearance((Character*)player.Address).Race is >0 and not 7;
+    public bool GroupEnabled(string group)=>group=="Lip color"?design["LipColorOverride"]?.Value<bool>("Apply")==true:Fields(group).Any(k=>Look[k]?.Value<bool>("Apply")==true);
     public void SetGroupEnabled(string group,bool enabled)
     {
+        if(group=="Lip color")
+        {
+            design["LipColorOverride"]=new JObject{["Value"]=Style("LipColor"),["Apply"]=enabled};
+            Save();return;
+        }
         foreach(var key in Fields(group))
         {
             var field=(JObject)(Look[key]??=new JObject{["Value"]=Style(key)});
@@ -460,11 +466,17 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         int index=key switch{
             "HairColor"=>4608+((c.Tribe-1)*2+c.Sex)*1280+1024+value,
             "HighlightsColor"=>2304+256+value,
+            "LipColor"=>value<128?512+value:1024+value-128,
             _=>value<128?640+value:1152+value-128};
         return index>=0 && (index+1)*4<=colors.Length?BitConverter.ToUInt32(colors,index*4)|0xff000000:0xff4c4c4c;
     }
     public unsafe byte Style(string key)
     {
+        if(key=="LipColor")
+        {
+            if(design["LipColorOverride"]?.Value<byte?>("Value") is {} shade)return shade;
+            return objects.LocalPlayer is {} player?EditorAppearance((Character*)player.Address).Data[20]:(byte)0;
+        }
         if(Look[key]?.Value<byte?>("Value") is {} value)return value;
         if(objects.LocalPlayer is not {} actor)return 0;
         var c=EditorAppearance((Character*)actor.Address);
@@ -472,7 +484,13 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
             "FacePaint"=>c.FacePaint,"FacePaintColor"=>c.FacePaintColor,"Highlights"=>(byte)(c.Highlights?128:0),
             "FacePaintReversed"=>(byte)(c.FacePaintReversed?128:0),_=>0};
     }
-    public void SetStyle(string key,byte value){Look[key]=new JObject{["Value"]=value,["Apply"]=true};Save();}
+    public void SetStyle(string key,byte value)
+    {
+        var field=new JObject{["Value"]=value,["Apply"]=true};
+        if(key=="LipColor")design["LipColorOverride"]=field;
+        else Look[key]=field;
+        Save();
+    }
     public bool HasCharacter=>ownership.Character!=0;
     public ISet<byte> FavoriteDyes{get;}=new HashSet<byte>();
     public void ToggleFavorite(byte id){if(!FavoriteDyes.Remove(id))FavoriteDyes.Add(id);saved["FavoriteDyes"]=new JArray(FavoriteDyes);Write();}

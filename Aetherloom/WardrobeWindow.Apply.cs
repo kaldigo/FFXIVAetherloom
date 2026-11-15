@@ -46,12 +46,14 @@ internal sealed partial class WardrobeWindow
                 Jobs(Resolve(slot.Value<ulong>("ItemId")).Jobs).Contains(job));
             if(!ReadBase(plan,out var baseLook,out result))return false;
             var composed=(JObject)plan.DeepClone();
-            composed["Customize"]=WardrobeBase.Compose(baseLook,(JObject)plan["Customize"]!);
+            var previous=CharacterSettings["AppliedFields"] as JObject??new JObject();
+            var look=WardrobeBase.Compose(baseLook,(JObject)plan["Customize"]!);
+            composed["Customize"]=WardrobeBase.WithLipColor(look,plan["LipColorOverride"] as JObject,
+                currentLook["Race"]?.Value<byte>("Value")??0,previous);
             var fields=WardrobeBase.Appearance.Select(f=>f.Key).ToArray();
             var skipped=new List<string>();
             var payload=WardrobeApplication.BuildPlan(currentGear,currentLook,composed,Gear.Concat(Accessories),
                 fields,main,CanApplyItem,skipped,out bool applyLook);
-            var previous=CharacterSettings["AppliedFields"] as JObject??new JObject();
             if(!WardrobeApplication.PlanRestoration(previous,payload,currentGear,currentLook,manual,Equipped,fields,out var next,out var restoreLook,baseLook))
             {result="Waiting for equipped gear.";return false;}
             applyLook|=restoreLook;
