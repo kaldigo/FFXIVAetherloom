@@ -1,1 +1,1 @@
-Right-click a wardrobe design to rename, clone or delete it. Clones open in the same folder with independent wardrobe settings and no job or zone assignments.
+Folder right-click menus open directly on their actions. The design title now includes a per-design ownership bypass for Apply to character. With bypass off, unavailable gear and its dyes are skipped.

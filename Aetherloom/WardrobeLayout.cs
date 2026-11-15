@@ -71,6 +71,8 @@ internal interface IWardrobe
     IReadOnlyCollection<uint> Assigned(string type);
     void Assign(string type,uint id,bool enabled);
     bool HasCharacter {get;}
+    bool BypassOwnership {get;set;}
+    void ApplyToCharacter();
     ISet<byte> FavoriteDyes {get;}
     void ToggleFavorite(byte id);
     bool? DisplayOption(string key);
@@ -285,7 +287,7 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
             var label=entry?.Name??WardrobeLibrary.Label(contextFolder);
             var kind=isDesign?"design":"folder";
             var parent=WardrobeLibrary.Parent(contextFolder);
-            if(!isDesign || libraryAction!=LibraryAction.Menu)
+            if(libraryAction!=LibraryAction.Menu)
                 WorkspaceControls.PickerHeading(libraryAction switch{LibraryAction.Rename=>"Rename "+kind,LibraryAction.Delete=>"Delete "+kind,_=>label});
             if(libraryAction==LibraryAction.Menu)
             {
@@ -393,7 +395,20 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
     private void Editor()
     {
         if(wardrobe.Selected==Guid.Empty){ImGui.TextWrapped("Create a design or add the aetherloom tag to a design in Glamourer.");return;}
-        Heading(wardrobe.Title);
+        const string bypassLabel="Bypass ownership";
+        var start=ImGui.GetCursorScreenPos();
+        var gap=ImGui.GetStyle().ItemSpacing.X;
+        var controlsWidth=ImGui.CalcTextSize(bypassLabel).X+gap+40*ImGui.GetTextLineHeight()/16f;
+        var labelX=start.X+ImGui.GetContentRegionAvail().X-controlsWidth;
+        ImGui.PushClipRect(start,new Vector2(labelX-gap,start.Y+ImGui.GetFrameHeight()*2),true);
+        ImGui.SetWindowFontScale(1.4f);ImGui.TextUnformatted(wardrobe.Title);ImGui.SetWindowFontScale(1);
+        ImGui.PopClipRect();
+        ImGui.SameLine();ImGui.SetCursorScreenPos(new Vector2(labelX,start.Y));
+        ImGui.AlignTextToFramePadding();ImGui.TextUnformatted(bypassLabel);ImGui.SameLine();
+        var bypass=Controls.Switch("ownership-bypass",wardrobe.BypassOwnership);
+        if(bypass!=wardrobe.BypassOwnership)wardrobe.BypassOwnership=bypass;
+        if(ImGui.IsItemHovered())ImGui.SetTooltip("Allow missing or unconfirmed gear when applying this design to your character.");
+        ImGui.Dummy(new Vector2(0,5*S));
         foreach(var jobs in wardrobe.Slots(false).Where(x=>x.Key.StartsWith("MainHand")).Select(x=>x.Item.Jobs).Where(x=>x.Length>0).Distinct())
         {ImGui.TextColored(new Vector4(.41f,.86f,.79f,1),jobs); ImGui.SameLine();}
         foreach(var tag in wardrobe.Tags.Where(WardrobeLibrary.VisibleTag))
@@ -461,9 +476,10 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         if(Tab is "Gear" or "Accessories" or "Appearance")
         {
             ImGui.SetCursorPosY(Math.Max(ImGui.GetCursorPosY()+8*S,ImGui.GetCursorPosY()+ImGui.GetContentRegionAvail().Y-48*S));
-            ImGui.BeginDisabled();
-            ImGui.Button("Apply to character"); if(Tab=="Gear"){ImGui.SameLine();ImGui.Button("Copy to glamour plate");}
+            ImGui.BeginDisabled(!wardrobe.HasCharacter);
+            if(ImGui.Button("Apply to character"))wardrobe.ApplyToCharacter();
             ImGui.EndDisabled();
+            if(Tab=="Gear"){ImGui.SameLine();ImGui.BeginDisabled();ImGui.Button("Copy to glamour plate");ImGui.EndDisabled();}
         }
 
     }
