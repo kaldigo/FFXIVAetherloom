@@ -60,6 +60,8 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         dyes=data.GetExcelSheet<Stain>().Where(s=>s.RowId is >0 and <256 && s.Name.ExtractText().Length>0).OrderBy(s=>s.SubOrder)
             .Select(s=>new WardrobeDye((byte)s.RowId,s.Name.ExtractText(),0xff000000u|(s.Color&255)<<16|(s.Color&0xff00)|(s.Color>>16&255),WardrobeDye.FamilyFromShade(s.Shade))).ToArray();
         if(saved["FavoriteDyes"] is JArray favorites)FavoriteDyes.UnionWith(favorites.Values<byte>());
+        if(saved["FavouriteDesigns"] is JArray starred)
+            foreach(var token in starred)if(Guid.TryParse(token.ToString(),out var id))favourites.Add(id);
         layout=new(this);
     }
     public override void PreDraw()=>WindowShell.PushHostStyle();
@@ -71,6 +73,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         if(Environment.TickCount64>=nextRefresh)Refresh();
         BeginWearableFrame();
         AdvanceImport();
+        editorAppearance=null;
         preview.WindowOrigin=ImGui.GetWindowPos();preview.WindowSize=ImGui.GetWindowSize();
         layout.Draw(()=>IsOpen=false);
     }
@@ -82,7 +85,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         {
             var snapshot=plugin.GetIpcSubscriber<string>(Api+"DesignLibrary").InvokeFunc();
             if(disconnected){disconnected=false;Message="";}
-            if(snapshot==lastSnapshot)return;
+            if(snapshot==lastSnapshot){if(projectionError!=null)projection=null;return;}
             var root=JObject.Parse(snapshot);
             var entries=root["Designs"]!.ToObject<LibraryDesign[]>()!.DistinctBy(d=>d.Id).ToArray();
             var byId=entries.ToDictionary(x=>x.Id);
@@ -91,6 +94,8 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
                 snapshot=plugin.GetIpcSubscriber<string>(Api+"DesignLibrary").InvokeFunc();
                 root=JObject.Parse(snapshot);entries=root["Designs"]!.ToObject<LibraryDesign[]>()!.DistinctBy(d=>d.Id).ToArray();
             }
+            bases=entries.Where(d=>WardrobeLibrary.Tagged(d.Tags,BaseTag) && !WardrobeLibrary.Tagged(d.Tags,WardrobeLibrary.Tag)).ToDictionary(d=>d.Id);
+            projection=null;projectionError=null;
             KnownTags=entries.SelectMany(d=>d.Tags).Where(WardrobeLibrary.VisibleTag).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
             ruleNotes.Clear();weaponJobTerms.Clear();
             wearableGear.Clear();
@@ -104,7 +109,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         }
         catch(Dalamud.Plugin.Ipc.Exceptions.IpcError)
         {
-            disconnected=true;lastSnapshot=null;
+            disconnected=true;lastSnapshot=null;projection=null;
             Message="Update or enable the Glamourer fork to load the wardrobe.";
         }
     }
@@ -172,6 +177,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     private void Write()
     {
         ruleNotes.Clear();referenceSnapshot=null;
+        saved["FavouriteDesigns"]=new JArray(favourites.Order().Select(id=>id.ToString()));
         saved["Plans"]=Plans;saved["Assignments"]=assignments;
         try{Directory.CreateDirectory(Path.GetDirectoryName(file)!);File.WriteAllText(file+".tmp",saved.ToString());File.Move(file+".tmp",file,true);Message="";}
         catch(IOException){Message="Could not save the wardrobe edit to disk.";}
@@ -249,7 +255,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     public bool DeleteDesign(Guid id)
     {
         if(!library.ContainsKey(id) || !Call(()=>plugin.GetIpcSubscriber<Guid,string>(Api+"DeleteDesign").InvokeFunc(id)))return false;
-        Plans.Remove(id.ToString());assignedJobTerms=null;
+        Plans.Remove(id.ToString());favourites.Remove(id);assignedJobTerms=null;
         foreach(var character in assignments.Properties().Select(p=>p.Value).OfType<JObject>())
             foreach(var type in character.Properties().Select(p=>p.Value).OfType<JObject>())
                 foreach(var binding in type.Properties().Where(p=>p.Value is JValue v && Guid.TryParse(v.ToString(),out var owner) && owner==id).ToArray())
@@ -402,10 +408,22 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         else {Extras.Remove(remove);if(previewHand==remove)previewHand="MainHand";}
         Save();
     }
+    private CustomizeData? editorAppearance;
+    private unsafe CustomizeData EditorAppearance(Character* actor)
+    {
+        if(editorAppearance is {} cached)return cached;
+        var c=CharacterPreview.VisibleCustomize(actor);
+        PrepareProjection();
+        if(projection?["Customize"] is not JObject look || projectionError!=null)return c;
+        foreach(var (key,index,mask) in WardrobeBase.Appearance)
+            if(WardrobeBase.TryValue(key,c.Data[index],mask,look,projection["PreviousBase"] as JObject,out var value))
+                c.Data[index]=(byte)((c.Data[index]&~mask)|(value&mask));
+        editorAppearance=c;return c;
+    }
     public unsafe IEnumerable<WardrobeStyle> Styles(string key)
     {
         if(objects.LocalPlayer is not {} actor)return [];
-        var c=CharacterPreview.VisibleCustomize((Character*)actor.Address);
+        var c=EditorAppearance((Character*)actor.Address);
         if(c.Tribe==0||c.Sex>1)return [];
         var cache=(c.Tribe,c.Sex,c.Face,key);
         if(styles.TryGetValue(cache,out var found))return found;
@@ -437,7 +455,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     {
         colors??=data.GetFile("chara/xls/charamake/human.cmp")?.Data??[];
         var actor=objects.LocalPlayer;if(actor==null)return 0xff4c4c4c;
-        var c=CharacterPreview.VisibleCustomize((Character*)actor.Address);
+        var c=EditorAppearance((Character*)actor.Address);
         // human.cmp contains two 2304-color global blocks followed by 1280 colors per clan/sex.
         int index=key switch{
             "HairColor"=>4608+((c.Tribe-1)*2+c.Sex)*1280+1024+value,
@@ -449,7 +467,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     {
         if(Look[key]?.Value<byte?>("Value") is {} value)return value;
         if(objects.LocalPlayer is not {} actor)return 0;
-        var c=CharacterPreview.VisibleCustomize((Character*)actor.Address);
+        var c=EditorAppearance((Character*)actor.Address);
         return key switch{"Hairstyle"=>c.Hairstyle,"HairColor"=>c.HairColor,"HighlightsColor"=>c.HighlightsColor,
             "FacePaint"=>c.FacePaint,"FacePaintColor"=>c.FacePaintColor,"Highlights"=>(byte)(c.Highlights?128:0),
             "FacePaintReversed"=>(byte)(c.FacePaintReversed?128:0),_=>0};
@@ -480,13 +498,30 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         if(hands.Length>1 && ImGui.BeginCombo("Preview weapon",hands.FirstOrDefault(x=>x.Key==previewHand)?.Item.Name??"Select weapon"))
         {foreach(var hand in hands)if(ImGui.Selectable(hand.Item.Name+"###"+hand.Key,hand.Key==previewHand)){previewHand=hand.Key;projection=null;}ImGui.EndCombo();}
     }
+    private void PrepareProjection()
+    {
+        if(previewCharacter!=ownership.Character){previewCharacter=ownership.Character;projection=null;}
+        if(projection==null && Selected!=Guid.Empty && !disconnected)
+        {
+            projectionError=null;
+            projection=(JObject)design.DeepClone();
+            try
+            {
+                if(ReadBase(design,out var baseLook,out var error))
+                {
+                    projection["Customize"]=WardrobeBase.Compose(baseLook,Look);
+                    if(HasCharacter && CharacterSettings["AppliedFields"] is JObject ledger)projection["PreviousBase"]=ledger.DeepClone();
+                    if(previewHand!="MainHand")((JObject)projection["Equipment"]!)["MainHand"]=Entry(previewHand).DeepClone();
+                }
+                else projectionError=error;
+            }
+            catch(Dalamud.Plugin.Ipc.Exceptions.IpcError){projectionError="The linked Glamourer base is unavailable.";}
+        }
+    }
     public void DrawPreview()
     {
-        if(projection==null && Selected!=Guid.Empty)
-        {
-            projection=(JObject)design.DeepClone();
-            if(previewHand!="MainHand")((JObject)projection["Equipment"]!)["MainHand"]=Entry(previewHand).DeepClone();
-        }
+        PrepareProjection();
+        if(projectionError!=null){preview.Draw(null);ImGui.TextWrapped(projectionError);return;}
         preview.Draw(projection);
     }
 }

@@ -7,9 +7,9 @@ namespace Aetherloom;
 internal sealed partial class WardrobeLayout
 {
     private readonly Dictionary<string,HashSet<string>> filters=WardrobeMetadata.Filters.ToDictionary(g=>g,_=>new HashSet<string>(StringComparer.OrdinalIgnoreCase));
-    private bool onlyAvailable;
-    private int FilterCount=>filters.Values.Count(set=>set.Count>0)+(onlyAvailable?1:0);
-    private string optionSearch="";
+    private bool onlyAvailable,onlyFavourites;
+    private int FilterCount=>filters.Values.Count(set=>set.Count>0)+(onlyAvailable?1:0)+(onlyFavourites?1:0);
+    private string optionSearch="",baseSearch="";
     private static readonly Dictionary<string,uint> Swatches=new(StringComparer.OrdinalIgnoreCase)
     {
         ["Beige"]=0xffa6d5df,["Black"]=0xff202020,["Blue"]=0xffce754e,["Brown"]=0xff38547e,
@@ -65,7 +65,7 @@ internal sealed partial class WardrobeLayout
         if(IconAction("Wardrobe filters",FilterCount))ImGui.OpenPopup("filters");
         AutoOpen("filters","filters");
         var anchor=ImGui.GetItemRectMax()+new Vector2(-12,8)*S;
-        if(!WorkspaceControls.BeginPicker("filters",330,395,anchor))return MatchingDesigns();
+        if(!WorkspaceControls.BeginPicker("filters",330,425,anchor))return MatchingDesigns();
         try
         {
             WorkspaceControls.PickerHeading("Wardrobe filters");
@@ -79,9 +79,10 @@ internal sealed partial class WardrobeLayout
                 finally { ImGui.PopID(); }
             }
             ImGui.Separator();
+            ImGui.Checkbox("Favourites only",ref onlyFavourites);
             if(ImGui.SmallButton("Clear filters"))
             {
-                onlyAvailable=false;
+                onlyAvailable=false;onlyFavourites=false;
                 foreach(var chosen in filters.Values)chosen.Clear();
             }
             var result=MatchingDesigns();
@@ -137,7 +138,7 @@ internal sealed partial class WardrobeLayout
             || WardrobeMetadata.ContainsText(WardrobeMetadata.Single(WardrobeMetadata.Gender,d.Metadata),word)
             || wardrobe.JobTerms(d.Id).Any(term=>term.Contains(word,StringComparison.OrdinalIgnoreCase)))
             && (!filtered || WardrobeMetadata.Matches(d.Metadata,filters,()=>wardrobe.WeaponTerms(d.Id)))
-            && (!onlyAvailable || wardrobe.Wearable(d.Id))).ToArray();
+            && (!onlyFavourites || wardrobe.IsFavourite(d.Id)) && (!onlyAvailable || wardrobe.Wearable(d.Id))).ToArray();
     }
 
     private IEnumerable<string> Options(string group)
@@ -346,6 +347,35 @@ internal sealed partial class WardrobeLayout
                 WorkspaceControls.EndPicker();
             }
             ImGui.PopID();
+        }
+        ImGui.Spacing();ImGui.Separator();ImGui.Spacing();
+        ImGui.AlignTextToFramePadding();ImGui.TextUnformatted("Base design");ImGui.SameLine(112*S);
+        var linked=wardrobe.LinkedBase;
+        var choicesForBase=wardrobe.Bases.OrderBy(d=>d.Name,StringComparer.OrdinalIgnoreCase).ThenBy(d=>d.Id).ToArray();
+        var caption=linked==null?"None":choicesForBase.FirstOrDefault(d=>d.Id==linked)?.Name??"Unavailable base";
+        if(ImGui.Button(caption+"###base-design",new Vector2(-1,0))){baseSearch="";ImGui.OpenPopup("bases");}
+        if(WorkspaceControls.BeginPicker("bases",320,300))
+        {
+            try
+            {
+                WorkspaceControls.PickerHeading("Appearance base");
+                ImGui.SetNextItemWidth(-1);ImGui.InputTextWithHint("##find-base","Search designs",ref baseSearch,100);
+                if(ImGui.Selectable("None",linked==null))wardrobe.SetBase(null);
+                ImGui.TextDisabled("Glamourer tag: aetherloom-base");
+                Guid? picked=null;
+                if(ImGui.BeginChild("base-list",new Vector2(-1,165*S)))
+                {
+                    foreach(var d in choicesForBase.Where(d=>d.Name.Contains(baseSearch,StringComparison.OrdinalIgnoreCase)))
+                    {
+                        var name=d.Folder.Length==0?d.Name:d.Folder+"/"+d.Name;
+                        if(ImGui.Selectable(name+"###"+d.Id,d.Id==linked))picked=d.Id;
+                        if(ImGui.IsItemHovered())ImGui.SetTooltip(d.Id.ToString());
+                    }
+                }
+                ImGui.EndChild();
+                if(picked.HasValue){wardrobe.SetBase(picked);ImGui.CloseCurrentPopup();}
+            }
+            finally{WorkspaceControls.EndPicker();}
         }
     }
 }

@@ -116,3 +116,28 @@ Demand(WardrobeApplication.PlanRestoration(activeFields,transition,new(),visible
 Demand(lookChanged && (int?)transition["Customize"]?["Hairstyle"]?["Value"]==2 && transition["Customize"]?["FacePaint"]==null && transition["Customize"]?["Race"]==null,"Restore unchanged managed hair, preserve external face paint and race");
 Demand((int?)transition["Equipment"]?["Head"]?["ItemId"]==102 && (int?)transition["Equipment"]?["Head"]?["Stain2"]==4 && (int?)remaining["Body"]==3 && remaining.Count==1,"Released slot reads actual equipped gear and dyes");
 Console.WriteLine("Assignment chain, conflicts, migration and restoration checks passed.");
+
+var origin=JObject.Parse("""{"Clan":{"Value":1},"Race":{"Value":1},"Hairstyle":{"Value":5},"Face":{"Value":3}}""");
+var baseA=JObject.Parse("""{"Clan":{"Value":15,"Apply":true},"Hairstyle":{"Value":3,"Apply":true},"Height":{"Value":99,"Apply":false}}""");
+var outfit=JObject.Parse("""{"Hairstyle":{"Value":7,"Apply":true},"Face":{"Value":9,"Apply":true}}""");
+var merged=WardrobeBase.Compose(baseA,outfit);
+Demand((int?)merged["Race"]?["Value"]==8 && (int?)merged["Hairstyle"]?["Value"]==7 && merged["Height"]==null && merged["Face"]==null,"Base composition respects enabled fields, clan and outfit precedence");
+var based=new JObject{["Equipment"]=new JObject(),["Customize"]=merged};
+var trackedFields=WardrobeBase.Appearance.Select(f=>f.Key).ToArray();
+Demand(WardrobeApplication.PlanRestoration(new(),based,new(),origin,true,RealGear,trackedFields,out var tracked,out _,baseA),"Manual base applied");
+var actual=(JObject)merged.DeepClone();actual["Face"]=new JObject{["Value"]=2};
+WardrobeBase.RecordApplied(new(),tracked,origin,actual,baseA);
+foreach(bool manual in new[]{true,false})
+{
+    var clean=new JObject{["Equipment"]=new JObject(),["Customize"]=new JObject()};
+    Demand(WardrobeApplication.PlanRestoration(tracked,clean,new(),actual,manual,RealGear,trackedFields,out var released,out var restore),"Switch away from linked base");
+    Demand(restore && released.Count==0 && (int?)clean["Customize"]?["Race"]?["Value"]==1 && (int?)clean["Customize"]?["Face"]?["Value"]==3,"Restore explicit and normalized fields in either mode");
+}
+var baseB=JObject.Parse("""{"Clan":{"Value":5,"Apply":true}}""");
+var second=new JObject{["Equipment"]=new JObject(),["Customize"]=WardrobeBase.Compose(baseB,new())};
+Demand(WardrobeApplication.PlanRestoration(tracked,second,new(),actual,false,RealGear,trackedFields,out var secondTracked,out _,baseB),"Replace one linked base with another");
+Demand((int?)secondTracked["Clan"]?["Before"]==1 && (int?)secondTracked["Clan"]?["Applied"]==5 && (int?)second["Customize"]?["Hairstyle"]?["Value"]==5,"Replacing a base keeps the original clan for later restoration and releases its hairstyle");
+var edited=(JObject)actual.DeepClone();edited["Face"]!["Value"]=4;
+var withoutBase=new JObject{["Equipment"]=new JObject(),["Customize"]=new JObject()};
+Demand(WardrobeApplication.PlanRestoration(tracked,withoutBase,new(),edited,true,RealGear,trackedFields,out var afterEdit,out _) && withoutBase["Customize"]!["Face"]==null && afterEdit["Face"]==null,"Preserve a later external edit while clearing the old link");
+Console.WriteLine("Linked appearance layering and restoration checks passed.");

@@ -25,6 +25,13 @@ public sealed class Plugin : IDalamudPlugin
         preview = new(framework, gameGui, conditions, objects, addons, log, data, textures);
         window = new(plugin, data, ownership, preview, textures, objects);
         plugin.GetIpcProvider<uint[]>(WardrobeWindow.DesignItemEndpoint).RegisterFunc(window.GetDesignItemIds);
+        plugin.GetIpcProvider<bool>("Aetherloom.GetAssignmentMode").RegisterFunc(()=>window.AssignmentMode);
+        plugin.GetIpcProvider<bool,bool>("Aetherloom.SetAssignmentMode").RegisterFunc(mode=>window.AssignmentMode=mode);
+        plugin.GetIpcProvider<bool>("Aetherloom.ToggleAssignmentMode").RegisterFunc(()=>window.AssignmentMode=!window.AssignmentMode);
+        plugin.GetIpcProvider<Guid,bool>("Aetherloom.ApplyDesign").RegisterFunc(window.ApplyById);
+        plugin.GetIpcProvider<Dictionary<Guid,string>>("Aetherloom.GetDesigns").RegisterFunc(()=>window.ListDesigns(false));
+        plugin.GetIpcProvider<Dictionary<Guid,string>>("Aetherloom.GetFavouriteDesigns").RegisterFunc(()=>window.ListDesigns(true));
+        plugin.GetIpcProvider<bool>("Aetherloom.RevertAll").RegisterFunc(window.RevertAll);
         assignments=new(window,framework,client,objects,conditions,log,plugin);
         windows.AddWindow(window);
         plugin.UiBuilder.Draw += windows.Draw;
@@ -40,6 +47,13 @@ public sealed class Plugin : IDalamudPlugin
     public void Dispose()
     {
         plugin.GetIpcProvider<uint[]>(WardrobeWindow.DesignItemEndpoint).UnregisterFunc();
+        plugin.GetIpcProvider<bool>("Aetherloom.GetAssignmentMode").UnregisterFunc();
+        plugin.GetIpcProvider<bool,bool>("Aetherloom.SetAssignmentMode").UnregisterFunc();
+        plugin.GetIpcProvider<bool>("Aetherloom.ToggleAssignmentMode").UnregisterFunc();
+        plugin.GetIpcProvider<Guid,bool>("Aetherloom.ApplyDesign").UnregisterFunc();
+        plugin.GetIpcProvider<Dictionary<Guid,string>>("Aetherloom.GetDesigns").UnregisterFunc();
+        plugin.GetIpcProvider<Dictionary<Guid,string>>("Aetherloom.GetFavouriteDesigns").UnregisterFunc();
+        plugin.GetIpcProvider<bool>("Aetherloom.RevertAll").UnregisterFunc();
         commands.RemoveHandler("/aetherloom");
         plugin.UiBuilder.OpenMainUi -= Open;
         plugin.UiBuilder.Draw -= windows.Draw;

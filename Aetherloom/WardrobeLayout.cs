@@ -72,6 +72,11 @@ internal interface IWardrobe
     void SetStyle(string key,byte id);
     bool GroupEnabled(string group);
     void SetGroupEnabled(string group,bool enabled);
+    bool IsFavourite(Guid id);
+    void ToggleFavouriteDesign();
+    IEnumerable<LibraryDesign> Bases {get;}
+    Guid? LinkedBase {get;}
+    void SetBase(Guid? id);
     bool AssignmentMode {get;set;}
     IEnumerable<(string Key,string Name)> RuleOptions(string type);
     IEnumerable<string> DesignRules {get;}
@@ -229,12 +234,7 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
             WorkspaceControls.EndPicker();
         }
         var matching=SearchAndFilters();
-        var automatic=wardrobe.AssignmentMode;
-        ImGui.AlignTextToFramePadding();ImGui.TextUnformatted("Manual");ImGui.SameLine();
-        var mode=Controls.Switch("wardrobe-mode",automatic);
-        if(mode!=automatic)wardrobe.AssignmentMode=mode;
-        if(ImGui.IsItemHovered())ImGui.SetTooltip("Switch wardrobe mode for all characters.");
-        ImGui.SameLine();ImGui.TextUnformatted("Assignments");
+        DrawModeSwitch();
         bool filtering=!string.IsNullOrWhiteSpace(filter) || FilterCount>0;
         ImGui.Spacing();ImGui.Separator();
         ImGui.PushStyleVar(ImGuiStyleVar.ScrollbarSize,8*S);
@@ -242,6 +242,23 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         ImGui.PopStyleVar();
         try { if(visible)DrawLibrary(matching,filtering); }
         finally { ImGui.EndChild(); }
+    }
+    private void DrawModeSwitch()
+    {
+        float gap=10*S;
+        ImGui.SetCursorPos(new Vector2((ImGui.GetWindowWidth()-40*S)/2,ImGui.GetCursorPosY()+4*S));
+        bool automatic=wardrobe.AssignmentMode;
+        bool mode=Controls.Switch("wardrobe-mode",automatic);
+        if(mode!=automatic)wardrobe.AssignmentMode=mode;
+        var min=ImGui.GetItemRectMin();
+        var max=ImGui.GetItemRectMax();
+        float textY=(min.Y+max.Y-ImGui.GetTextLineHeight())/2;
+        var draw=ImGui.GetWindowDrawList();
+        draw.AddText(new Vector2(min.X-gap-ImGui.CalcTextSize("Manual").X,textY),
+            ImGui.GetColorU32(mode?ImGuiCol.TextDisabled:ImGuiCol.Text),"Manual");
+        draw.AddText(new Vector2(max.X+gap,textY),
+            ImGui.GetColorU32(mode?ImGuiCol.Text:ImGuiCol.TextDisabled),"Assignments");
+        if(ImGui.IsItemHovered())ImGui.SetTooltip("Switch wardrobe mode for all characters.");
     }
     private void DrawLibrary(LibraryDesign[] matching,bool filtering)
     {
@@ -418,6 +435,24 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         var controlsWidth=ImGui.CalcTextSize(bypassLabel).X+gap+40*ImGui.GetTextLineHeight()/16f;
         var labelX=start.X+ImGui.GetContentRegionAvail().X-controlsWidth;
         ImGui.PushClipRect(start,new Vector2(labelX-gap,start.Y+ImGui.GetFrameHeight()*2),true);
+        float side=24*S;
+        bool favourite=wardrobe.IsFavourite(wardrobe.Selected);
+        if(ImGui.Button("###star-design",new Vector2(side)))wardrobe.ToggleFavouriteDesign();
+        var centre=(ImGui.GetItemRectMin()+ImGui.GetItemRectMax())/2;
+        var dl=ImGui.GetWindowDrawList();
+        uint colour=favourite?0xff7bd7ff:ImGui.GetColorU32(ImGuiCol.TextDisabled);
+        Vector2 Point(int i)
+        {
+            float angle=(i-2.5f)*MathF.PI/5;
+            return centre+new Vector2(MathF.Cos(angle),MathF.Sin(angle))*(i%2==0?8:3.8f)*S;
+        }
+        for(int i=0;i<10;i++)
+        {
+            if(favourite)dl.AddTriangleFilled(centre,Point(i),Point((i+1)%10),colour);
+            else dl.AddLine(Point(i),Point((i+1)%10),colour,1.4f*S);
+        }
+        if(ImGui.IsItemHovered())ImGui.SetTooltip(favourite?"Remove from favourites":"Add to favourites");
+        ImGui.SameLine();
         ImGui.SetWindowFontScale(1.4f);ImGui.TextUnformatted(wardrobe.Title);ImGui.SetWindowFontScale(1);
         ImGui.PopClipRect();
         ImGui.SameLine();ImGui.SetCursorScreenPos(new Vector2(labelX,start.Y));

@@ -38,7 +38,7 @@ internal static class WardrobeApplication
     // Equipped inventory indices include the unused waist slot at index 5.
     private static readonly string[] EquippedSlots=["MainHand","OffHand","Head","Body","Hands","","Legs","Feet","Ears","Neck","Wrists","RFinger","LFinger"];
     internal static bool PlanRestoration(JObject previous,JObject payload,JObject currentGear,JObject currentLook,
-        bool manual,Func<int,JObject?> equippedAt,IEnumerable<string> appearanceFields,out JObject next,out bool restoreLook)
+        bool manual,Func<int,JObject?> equippedAt,IEnumerable<string> appearanceFields,out JObject next,out bool restoreLook,JObject? baseLook=null)
     {
         next=manual?(JObject)previous.DeepClone():new JObject();
         restoreLook=false;
@@ -72,13 +72,15 @@ internal static class WardrobeApplication
             if((isLook?currentLook:currentGear)[field] is not JObject current || current[attr] is not {} value)continue;
             var old=previous[field] as JObject;
             var unchanged=old!=null && JToken.DeepEquals(old["Applied"],value);
+            bool fromBase=isLook && (baseLook?[field]?.Value<bool>("Apply")==true || (field=="Race" && baseLook?["Clan"]?.Value<bool>("Apply")==true));
             if(section[field] is JObject target && target.Value<bool>("Apply") && target[attr] is {} applied)
-                next[field]=new JObject{["Before"]=(unchanged?old!["Before"]:value)?.DeepClone(),["Applied"]=applied.DeepClone()};
-            else if(!manual && unchanged)
+                next[field]=new JObject{["Before"]=(unchanged?old!["Before"]:value)?.DeepClone(),["Applied"]=applied.DeepClone(),["Base"]=fromBase};
+            else if((!manual || old?.Value<bool>("Base")==true) && unchanged)
             {
                 section[field]=new JObject{[attr]=old!["Before"]?.DeepClone(),["Apply"]=true};
-                restoreLook|=isLook;
+                next.Remove(field);restoreLook|=isLook;
             }
+            else if(old?.Value<bool>("Base")==true)next.Remove(field);
         }
         return true;
     }

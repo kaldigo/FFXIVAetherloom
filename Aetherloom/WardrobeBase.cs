@@ -1,0 +1,65 @@
+using Newtonsoft.Json.Linq;
+
+namespace Aetherloom;
+
+internal static class WardrobeBase
+{
+    // Glamourer's serialized Customize field names and the corresponding player customization bits.
+    internal static readonly (string Key,int Index,byte Mask)[] Appearance=
+    [
+        ("Race",0,0xFF), ("Gender",1,0xFF), ("BodyType",2,0xFF),
+        ("Height",3,0xFF), ("Clan",4,0xFF), ("Face",5,0xFF),
+        ("Hairstyle",6,0xFF), ("Highlights",7,0x80), ("SkinColor",8,0xFF),
+        ("EyeColorRight",9,0xFF), ("HairColor",10,0xFF), ("HighlightsColor",11,0xFF),
+        ("FacialFeature1",12,0x01), ("FacialFeature2",12,0x02), ("FacialFeature3",12,0x04),
+        ("FacialFeature4",12,0x08), ("FacialFeature5",12,0x10), ("FacialFeature6",12,0x20),
+        ("FacialFeature7",12,0x40), ("LegacyTattoo",12,0x80), ("TattooColor",13,0xFF),
+        ("Eyebrows",14,0xFF), ("EyeColorLeft",15,0xFF), ("EyeShape",16,0x7F),
+        ("SmallIris",16,0x80), ("Nose",17,0xFF), ("Jaw",18,0xFF),
+        ("Mouth",19,0x7F), ("Lipstick",19,0x80), ("LipColor",20,0xFF),
+        ("MuscleMass",21,0xFF), ("TailShape",22,0xFF), ("BustSize",23,0xFF),
+        ("FacePaint",24,0x7F), ("FacePaintReversed",24,0x80), ("FacePaintColor",25,0xFF),
+    ];
+    internal static readonly string[] OutfitFields=["Hairstyle","Highlights","HairColor","HighlightsColor","FacePaint","FacePaintReversed","FacePaintColor"];
+
+    // Clan and gender changes can make Glamourer normalize other appearance fields.
+    internal static void RecordApplied(JObject previous,JObject next,JObject before,JObject after,JObject baseLook)
+    {
+        bool normalize=baseLook["Clan"]?.Value<bool>("Apply")==true || baseLook["Gender"]?.Value<bool>("Apply")==true;
+        foreach(var (key,_,_) in Appearance)
+        {
+            if(after[key]?["Value"] is not {} actual || before[key]?["Value"] is not {} visible)continue;
+            if(next[key] is JObject tracked)
+            {
+                tracked["Applied"]=actual.DeepClone();
+                continue;
+            }
+            var old=previous[key] as JObject;
+            var baseline=old!=null && JToken.DeepEquals(old["Applied"],visible)?old["Before"]:visible;
+            if(normalize && baseline!=null && !JToken.DeepEquals(baseline,actual))
+                next[key]=new JObject{["Before"]=baseline.DeepClone(),["Applied"]=actual.DeepClone(),["Base"]=true};
+        }
+    }
+
+    internal static bool TryValue(string key,byte current,byte mask,JObject look,JObject? previous,out byte value)
+    {
+        if(look[key] is JObject field && field.Value<bool>("Apply"))
+        {value=field.Value<byte>("Value");return true;}
+        if(previous?[key] is JObject old && old.Value<bool>("Base") && (current&mask)==old.Value<byte>("Applied"))
+        {value=old.Value<byte>("Before");return true;}
+        value=current;return false;
+    }
+
+    internal static JObject Compose(JObject? baseLook,JObject outfit)
+    {
+        var result=new JObject();
+        foreach(var (key,_,_) in Appearance)
+            if(baseLook?[key] is JObject field && field.Value<bool>("Apply"))result[key]=field.DeepClone();
+        // Glamourer changes race through clan. Carry the matching race into the native preview too.
+        if(result["Clan"] is JObject clan && clan.Value<int>("Value") is >=1 and <=16 and var tribe)
+            result["Race"]=new JObject{["Value"]=(tribe+1)/2,["Apply"]=true};
+        foreach(var key in OutfitFields)
+            if(outfit[key] is JObject field && field.Value<bool>("Apply"))result[key]=field.DeepClone();
+        return result;
+    }
+}

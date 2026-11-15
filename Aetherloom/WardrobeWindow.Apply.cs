@@ -13,8 +13,7 @@ internal sealed partial class WardrobeWindow
 
     public void ApplyToCharacter()
     {
-        if(ApplyDesignToCharacter(Selected,out var result,true))AssignmentMode=false;
-        Message=result;
+        _=ApplyById(Selected);
     }
 
     internal bool ApplyDesignToCharacter(Guid id,out string result,bool manual=false)
@@ -45,11 +44,15 @@ internal sealed partial class WardrobeWindow
             var hands=plan["AdditionalMainHands"] is JObject extras ? extras.Properties().Select(p=>p.Value) : [];
             var main=hands.Prepend(equipment["MainHand"]).OfType<JObject>().FirstOrDefault(slot=>
                 Jobs(Resolve(slot.Value<ulong>("ItemId")).Jobs).Contains(job));
+            if(!ReadBase(plan,out var baseLook,out result))return false;
+            var composed=(JObject)plan.DeepClone();
+            composed["Customize"]=WardrobeBase.Compose(baseLook,(JObject)plan["Customize"]!);
+            var fields=WardrobeBase.Appearance.Select(f=>f.Key).ToArray();
             var skipped=new List<string>();
-            var payload=WardrobeApplication.BuildPlan(currentGear,currentLook,plan,Gear.Concat(Accessories),
-                Fields("Hair").Concat(Fields("Face paint")),main,CanApplyItem,skipped,out bool applyLook);
+            var payload=WardrobeApplication.BuildPlan(currentGear,currentLook,composed,Gear.Concat(Accessories),
+                fields,main,CanApplyItem,skipped,out bool applyLook);
             var previous=CharacterSettings["AppliedFields"] as JObject??new JObject();
-            if(!WardrobeApplication.PlanRestoration(previous,payload,currentGear,currentLook,manual,Equipped,Fields("Hair").Concat(Fields("Face paint")),out var next,out var restoreLook))
+            if(!WardrobeApplication.PlanRestoration(previous,payload,currentGear,currentLook,manual,Equipped,fields,out var next,out var restoreLook,baseLook))
             {result="Waiting for equipped gear.";return false;}
             applyLook|=restoreLook;
             // Once + Equipment, plus Customization when a wardrobe appearance field is enabled.
@@ -60,7 +63,17 @@ internal sealed partial class WardrobeWindow
                 result=$"Glamourer could not apply the design (code {response}).";
                 return false;
             }
-            if(!JToken.DeepEquals(previous,next)){CharacterSettings["AppliedFields"]=next;Write();}
+            if(baseLook!=null)
+            {
+                try
+                {
+                    var (code,applied)=plugin.GetIpcSubscriber<int,uint,(int,JObject?)>("Glamourer.GetState").InvokeFunc(player.ObjectIndex,0);
+                    if(code==0 && applied?["Customize"] is JObject actual)
+                        WardrobeBase.RecordApplied(previous,next,currentLook,actual,baseLook);
+                }
+                catch(Dalamud.Plugin.Ipc.Exceptions.IpcError) { /* Keep the requested values if readback is unavailable. */ }
+            }
+            if(!JToken.DeepEquals(previous,next)){CharacterSettings["AppliedFields"]=next;projection=null;Write();}
             result=skipped.Count==0?"Design applied.":"Skipped for ownership: "+string.Join(", ",skipped.Select(key=>Labels.GetValueOrDefault(key,key)))+".";
             return true;
         }

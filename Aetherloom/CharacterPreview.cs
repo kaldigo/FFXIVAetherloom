@@ -160,7 +160,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
                 {
                     if(desired["Equipment"] is not JObject gear || desired["Customize"] is not JObject look || look.Value<uint>("ModelId")!=0)
                     { Stop("Select a player-character design to preview.");return; }
-                    notes=PreviewOutfit.Apply(ref model,gear,look,data);
+                    notes=PreviewOutfit.Apply(ref model,gear,look,data,desired["PreviousBase"] as JObject);
                 }
                 if(view==null || !SameModel(ref model,ref loadedModel))
                 {

@@ -9,11 +9,7 @@ internal static class PreviewOutfit
 {
     // Native equipment model order, followed separately by the two weapon slots.
     private static readonly string[] Armor = ["Head", "Body", "Hands", "Legs", "Feet", "Ears", "Neck", "Wrists", "RFinger", "LFinger"];
-    private static readonly (string Key, int Index, byte Mask)[] Appearance =
-        [("Hairstyle", 6, 255), ("Highlights", 7, 128), ("HairColor", 10, 255), ("HighlightsColor", 11, 255),
-         ("FacePaint", 24, 127), ("FacePaintReversed", 24, 128), ("FacePaintColor", 25, 255)];
-
-    public static string Apply(ref CharaViewModelData model, JObject gear, JObject look, IDataManager data)
+    public static string Apply(ref CharaViewModelData model, JObject gear, JObject look, IDataManager data,JObject? priorBase=null)
     {
         var skipped = new List<string>();
         var items = data.GetExcelSheet<Item>();
@@ -68,16 +64,21 @@ internal static class PreviewOutfit
         if (gear["VieraEars"] is JObject ears && ears.Value<bool>("Apply")) model.VieraEarsHidden = !ears.Value<bool>("Show");
 
         var bytes = model.CustomizeData.Data;
-        foreach (var (key, index, mask) in Appearance)
+        var originalIdentity=(bytes[4],bytes[1],bytes[5]);
+        foreach (var (key, index, mask) in WardrobeBase.Appearance)
         {
-            if (look[key] is not JObject field || !field.Value<bool>("Apply")) continue;
-            var value = field.Value<byte>("Value");
+            if(!WardrobeBase.TryValue(key,bytes[index],mask,look,priorBase,out var value))continue;
             if (key == "Hairstyle" && value != bytes[index] && !SupportsHairstyle(data, bytes[4], bytes[1], bytes[0], bytes[5], value))
             {
                 skipped.Add($"hairstyle {value} (unavailable for this character)");
                 continue;
             }
             bytes[index] = (byte)((bytes[index] & ~mask) | (value & mask));
+        }
+        if(originalIdentity!=(bytes[4],bytes[1],bytes[5]) && !SupportsHairstyle(data,bytes[4],bytes[1],bytes[0],bytes[5],bytes[6]))
+        {
+            for(int style=1;style<=byte.MaxValue;style++)
+                if(SupportsHairstyle(data,bytes[4],bytes[1],bytes[0],bytes[5],(byte)style)){bytes[6]=(byte)style;break;}
         }
         return skipped.Count == 0 ? "" : $"Kept your equipped appearance for {string.Join(", ", skipped)}.";
     }
