@@ -426,8 +426,18 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         ImGui.EndDragDropTarget();
     }
 
+    private Guid? assignmentEditorDesign;
     private void Editor()
     {
+        if(assignmentEditorDesign.HasValue && assignmentEditorDesign!=wardrobe.Selected)
+        {
+            locationType=rulePlace="";
+            ruleJob="any";
+            extraPlaces.Clear();
+            extraJobs.Clear();
+            moveRequest=null;
+        }
+        assignmentEditorDesign=wardrobe.Selected;
         if(wardrobe.Selected==Guid.Empty){ImGui.TextWrapped("Create a design or add the aetherloom tag to a design in Glamourer.");return;}
         const string bypassLabel="Bypass ownership";
         var start=ImGui.GetCursorScreenPos();
@@ -605,7 +615,7 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         ImGui.Separator();if(ImGui.Button("Remove dye")){wardrobe.SetDye(slot.Key,channel,0);ImGui.CloseCurrentPopup();}
         WorkspaceControls.EndPicker();
     }
-    private string locationType="Anywhere", rulePlace="any", ruleJob="any";
+    private string locationType="", rulePlace="", ruleJob="any";
     private readonly HashSet<string> extraPlaces=[], extraJobs=[];
     private (Guid Design,string Key,Guid Owner)? moveRequest;
     private void DrawAssignments()
@@ -621,6 +631,7 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         var previousType=locationType;
         Select("Location type",ref locationType,new[]{"Anywhere","Region","City or zone","Named area","Inn","Housing"}.Select(t=>(t,t)));
         if(previousType!=locationType){rulePlace=locationType=="Anywhere"?"any":"";extraPlaces.Clear();}
+        if(locationType.Length==0)return;
         if(locationType!="Anywhere")Select("Location",ref rulePlace,wardrobe.RuleOptions(locationType),extraPlaces);
         Select("Job or role",ref ruleJob,wardrobe.RuleOptions("Job"),extraJobs);
         if(rulePlace.Length==0 || ruleJob.Length==0)return;
