@@ -83,7 +83,7 @@ internal interface IWardrobe
     string RuleLabel(string key);
     Guid? RuleOwner(string key);
     string RuleNote(string key);
-    void SaveRule(string key,Guid? expected,bool remove);
+    bool SaveRule(string key,Guid? expected,bool remove);
     bool HasCharacter {get;}
     bool BypassOwnership {get;set;}
     void ApplyToCharacter();
@@ -430,13 +430,7 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
     private void Editor()
     {
         if(assignmentEditorDesign.HasValue && assignmentEditorDesign!=wardrobe.Selected)
-        {
-            locationType=rulePlace="";
-            ruleJob="any";
-            extraPlaces.Clear();
-            extraJobs.Clear();
-            moveRequest=null;
-        }
+            ClearAssignmentDraft();
         assignmentEditorDesign=wardrobe.Selected;
         if(wardrobe.Selected==Guid.Empty){ImGui.TextWrapped("Create a design or add the aetherloom tag to a design in Glamourer.");return;}
         const string bypassLabel="Bypass ownership";
@@ -482,6 +476,7 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
                     if(!ImGui.BeginTabItem(tab, startupTab==tab?ImGuiTabItemFlags.SetSelected:0)) continue;
                     try
                     {
+                        if(Tab=="Assignments" && tab!=Tab)ClearAssignmentDraft();
                         Tab=tab;
                         ImGui.Spacing();
                         if(tab=="Appearance")
@@ -618,6 +613,14 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
     private string locationType="", rulePlace="", ruleJob="any";
     private readonly HashSet<string> extraPlaces=[], extraJobs=[];
     private (Guid Design,string Key,Guid Owner)? moveRequest;
+    private void ClearAssignmentDraft()
+    {
+        locationType=rulePlace=assignmentSearch="";
+        ruleJob="any";
+        extraPlaces.Clear();
+        extraJobs.Clear();
+        moveRequest=null;
+    }
     private void DrawAssignments()
     {
         if(!wardrobe.HasCharacter){ImGui.TextUnformatted("Log in to manage assignments.");return;}
@@ -633,7 +636,7 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         if(previousType!=locationType){rulePlace=locationType=="Anywhere"?"any":"";extraPlaces.Clear();}
         if(locationType.Length==0)return;
         if(locationType!="Anywhere")Select("Location",ref rulePlace,wardrobe.RuleOptions(locationType),extraPlaces);
-        Select("Job or role",ref ruleJob,wardrobe.RuleOptions("Job"),extraJobs);
+        Select("Jobs or roles",ref ruleJob,wardrobe.RuleOptions("Job"),extraJobs);
         if(rulePlace.Length==0 || ruleJob.Length==0)return;
         var places=extraPlaces.Prepend(rulePlace).Distinct().ToArray();
         var jobs=extraJobs.Prepend(ruleJob).Distinct().ToArray();
@@ -668,25 +671,30 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
                     WorkspaceControls.PickerHeading("Move assignment");
                     ImGui.TextWrapped($"Move {wardrobe.RuleLabel(condition)} from {name} to {wardrobe.Title}?");
                     if(ImGui.Button("Move") && moveRequest==(wardrobe.Selected,condition,other))
-                    {wardrobe.SaveRule(condition,other,false);ImGui.CloseCurrentPopup();}
+                    {if(wardrobe.SaveRule(condition,other,false))ClearAssignmentDraft();ImGui.CloseCurrentPopup();}
                     ImGui.SameLine();if(ImGui.Button("Cancel"))ImGui.CloseCurrentPopup();
                     WorkspaceControls.EndPicker();
                 }
             }
-            else if(ImGui.Button("Add assignment"))wardrobe.SaveRule(condition,null,false);
+            else if(ImGui.Button("Add assignment") && wardrobe.SaveRule(condition,null,false))ClearAssignmentDraft();
         }
         void Select(string title,ref string selected,IEnumerable<(string Key,string Name)> options,HashSet<string>? extras=null)
         {
             ImGui.PushID(title);
             var list=options as (string Key,string Name)[]??options.ToArray();
             var current=selected;var label=list.FirstOrDefault(o=>o.Key==current).Name??("Choose "+title.ToLowerInvariant());
-            if(extras is {Count:>0})label+="  +"+extras.Count;
+            var selectedNames=extras is {Count:>0}
+                ? list.Where(o=>o.Key==current || extras.Contains(o.Key)).Select(o=>o.Name).ToArray()
+                : [];
+            if(selectedNames.Length>1)label=selectedNames.Length+" selected";
             ImGui.AlignTextToFramePadding();ImGui.TextUnformatted(title);ImGui.SameLine(120*S);
             if(ImGui.Button(label+"###selector",new Vector2(-1,0))){assignmentSearch="";ImGui.OpenPopup("choices");}
-            AutoOpen(title=="Job or role"?"Jobs":title=="Location type"?"Zones":title,"choices");
+            if(selectedNames.Length>1)ImGui.TextWrapped(string.Join(", ",selectedNames));
+            AutoOpen(title=="Jobs or roles"?"Jobs":title=="Location type"?"Zones":title,"choices");
             if(WorkspaceControls.BeginPicker("choices",310,340))
             {
                 WorkspaceControls.PickerHeading(title);
+                if(extras!=null)ImGui.TextDisabled(title=="Jobs or roles"?"Select one or more jobs or roles.":"Select one or more locations.");
                 if(ImGui.IsWindowAppearing())ImGui.SetKeyboardFocusHere();
                 ImGui.SetNextItemWidth(-1);
                 bool searched=ImGui.InputTextWithHint("##find","Search",ref assignmentSearch,90);
@@ -695,7 +703,13 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
                 {
                     if(searched)ImGui.SetScrollY(0);
                     foreach(var option in list.Where(o=>o.Name.Contains(assignmentSearch,StringComparison.OrdinalIgnoreCase)))
-                        if(ImGui.Selectable(option.Name+"###"+option.Key,selected==option.Key || extras?.Contains(option.Key)==true,ImGuiSelectableFlags.DontClosePopups))choice=option.Key;
+                    {
+                        var name=option.Name+"###"+option.Key;
+                        bool checkedOption=selected==option.Key || extras?.Contains(option.Key)==true;
+                        bool clicked=extras!=null ? ImGui.Checkbox(name,ref checkedOption)
+                            : ImGui.Selectable(name,checkedOption,ImGuiSelectableFlags.DontClosePopups);
+                        if(clicked)choice=option.Key;
+                    }
                 }
                 ImGui.EndChild();
                 if(choice!=null)

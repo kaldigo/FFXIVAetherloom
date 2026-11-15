@@ -58,10 +58,10 @@ internal sealed partial class WardrobeWindow
         }
         return notes.Count switch{0=>"",1=>"Takes priority over "+notes.First()+".",_=>"Depending on location or job, takes priority over: "+string.Join("; ",notes.Order())+"."};
     }
-    public void SaveRule(string key,Guid? expected,bool remove)
+    public bool SaveRule(string key,Guid? expected,bool remove)
     {
-        if(!HasCharacter || !library.ContainsKey(Selected) || !WardrobeAssignment.Edit(Rules,key,Selected,expected,remove))return;
-        assignedJobTerms=null;Write();
+        if(!HasCharacter || !library.ContainsKey(Selected) || !WardrobeAssignment.Edit(Rules,key,Selected,expected,remove))return false;
+        assignedJobTerms=null;Write();return true;
     }
     internal bool TryAssignment(uint job,uint territory,uint map,out WardrobeAssignment assignment)
     {
