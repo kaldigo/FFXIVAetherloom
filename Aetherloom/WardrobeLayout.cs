@@ -57,6 +57,7 @@ internal interface IWardrobe
     void SetGroupEnabled(string group,bool enabled);
     bool IsFavourite(Guid id);
     void ToggleFavouriteDesign();
+    bool ScanBases(bool opening)=>false;
     IEnumerable<LibraryDesign> Bases {get;}
     Guid? LinkedBase {get;}
     void SetBase(Guid? id);

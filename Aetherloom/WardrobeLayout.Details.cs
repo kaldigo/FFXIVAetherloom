@@ -358,10 +358,11 @@ internal sealed partial class WardrobeLayout
         {
             try
             {
+                bool scanning=wardrobe.ScanBases(ImGui.IsWindowAppearing());
                 WorkspaceControls.PickerHeading("Appearance base");
                 ImGui.SetNextItemWidth(-1);ImGui.InputTextWithHint("##find-base","Search designs",ref baseSearch,100);
                 if(ImGui.Selectable("None",linked==null))wardrobe.SetBase(null);
-                ImGui.TextDisabled("Glamourer tag: aetherloom-base");
+                ImGui.TextDisabled(scanning?"Looking for tagged Glamourer designs...":"Glamourer tag: aetherloom-base");
                 Guid? picked=null;
                 if(ImGui.BeginChild("base-list",new Vector2(-1,165*S)))
                 {

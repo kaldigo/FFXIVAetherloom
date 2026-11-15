@@ -185,3 +185,4 @@ Console.WriteLine("Worn outfit appearance isolation checks passed.");
 
 MigrationChecks.Run();
 if(args is ["--rehearse",var configRoot])MigrationChecks.Rehearse(configRoot);
+if(args is ["--stage-migration",var root,var staged])MigrationChecks.Rehearse(root,staged);

@@ -116,7 +116,6 @@ internal sealed partial class WardrobeWindow
         loading=null;
         importing=null;
         ImportStatus=$"Import stopped after {created} new design(s). {reason}";
-        lastSnapshot=null;
     }
 
     public void DisposeImports() => importHttp.Dispose();

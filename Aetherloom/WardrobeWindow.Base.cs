@@ -5,9 +5,9 @@ namespace Aetherloom;
 
 internal sealed partial class WardrobeWindow
 {
-    private const string BaseTag="aetherloom-base";
+    private readonly Queue<KeyValuePair<Guid,string>> baseScan=[];
     private readonly HashSet<Guid> favourites=[];
-    private Dictionary<Guid,LibraryDesign> bases=[];
+    private readonly Dictionary<Guid,LibraryDesign> bases=[];
     private ulong previewCharacter;
     private string? projectionError;
     public IEnumerable<LibraryDesign> Bases=>bases.Values;
@@ -25,13 +25,50 @@ internal sealed partial class WardrobeWindow
         if(!favourites.Add(Selected))favourites.Remove(Selected);
         Write();
     }
+    public bool ScanBases(bool opening)
+    {
+        try
+        {
+            if(opening)
+            {
+                baseScan.Clear();
+                var listed=GlamourerDesigns();
+                foreach(var id in bases.Keys.Except(listed.Keys).ToArray())bases.Remove(id);
+                foreach(var entry in listed)baseScan.Enqueue(entry);
+            }
+            for(int i=0;i<4 && baseScan.TryDequeue(out var entry);i++)
+                ReadBaseEntry(entry.Key,entry.Value,out _);
+        }
+        catch(Exception ex) when(ex is IpcError or System.IO.InvalidDataException)
+        {baseScan.Clear();bases.Clear();Message="Could not read Glamourer bases: "+ex.Message;}
+        return baseScan.Count!=0;
+    }
+
+    private bool ReadBaseEntry(Guid id,string name,out JObject? source)
+    {
+        source=GlamourerDesign(id);
+        if(source!=null)
+        {
+            var entry=WardrobeStore.Describe(id,name,source);
+            if(WardrobeStore.IsAppearanceBase(entry)){bases[id]=entry;return true;}
+        }
+        bases.Remove(id);return false;
+    }
+
     private bool ReadBase(JObject plan,out JObject? look,out string error)
     {
         look=null;error="";
         if(plan["BaseDesign"]==null)return true;
-        if(!Guid.TryParse(plan.Value<string>("BaseDesign"),out var id) || !bases.ContainsKey(id))
-        {error="Linked base unavailable. Choose a Glamourer design tagged aetherloom-base or clear the link.";return false;}
-        var source=plugin.GetIpcSubscriber<Guid,JObject?>("Glamourer.GetDesignJObject").InvokeFunc(id);
+        JObject? source;
+        try
+        {
+            if(!Guid.TryParse(plan.Value<string>("BaseDesign"),out var id) || !ReadBaseEntry(id,id.ToString(),out source))
+            {
+                error="Linked base unavailable. Choose a Glamourer design tagged aetherloom-base or clear the link.";
+                return false;
+            }
+        }
+        catch(System.IO.InvalidDataException ex){error=ex.Message;return false;}
         if(source?["Customize"] is not JObject appearance || appearance.Value<uint>("ModelId")!=0)
         {error="The linked base must be a player-character design.";return false;}
         look=appearance;return true;

@@ -2,7 +2,7 @@
 
 Open `/aetherloom` to create, organize and apply outfits. Aetherloom stores its designs and folders in `wardrobe-plans.json`. Glamourer handles character state and supplies linked appearance bases.
 
-On the first wardrobe access after updating, enable the Glamourer fork so Aetherloom can read the existing library. It copies tagged designs, uses existing Aetherloom plans for outfit contents, and preserves wardrobe folders (including empty ones), tags, design IDs, favourites, assignments and linked bases. Tagged designs outside wardrobe folders appear at the root. Aetherloom saves a pre-migration copy of the existing file as `wardrobe-plans.json.pre-local.bak`. If a required design is unavailable, migration retries and Steward treats the source as unavailable until the complete library is saved.
+On the first wardrobe access after updating, enable Glamourer so Aetherloom can read the existing library using its public design IPC. It copies tagged designs, uses existing Aetherloom plans for outfit contents, and preserves wardrobe folders (including empty ones), tags, design IDs, favourites, assignments and linked bases. Tagged designs outside wardrobe folders appear at the root. Aetherloom saves a pre-migration copy of the existing file as `wardrobe-plans.json.pre-local.bak`. If a required design is unavailable, migration retries and Steward treats the source as unavailable until the complete library is saved.
 
 After migration, creation, imports, edits and deletions operate locally. Existing Glamourer designs and folders stay in Glamourer. Steward reads the local wardrobe, including alternate main hands, even when the editor is closed.
 

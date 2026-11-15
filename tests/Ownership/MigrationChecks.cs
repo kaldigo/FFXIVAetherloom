@@ -36,10 +36,17 @@ internal static class MigrationChecks
         WardrobeStore.ChangeFolder(result,"[AL] A","","New");
         WardrobeStore.ChangeFolder(result,"[AL] New","",null);
         Check((string?)plans[stored.ToString()]!["Folder"]=="[AL] B" && result["Folders"]!.Values<string>().Contains("[AL] Empty"),"folder promotion");
-        Console.WriteLine("Wardrobe library migration checks passed.");
+        var upstream=new JObject{["Identifier"]=baseId.ToString(),["Name"]="Renamed",["Tags"]=new JArray("Aetherloom-Base"),["FileSystemFolder"]="Shared"};
+        var entry=WardrobeStore.Describe(baseId,"Original",upstream);
+        Check(entry.Id==baseId && entry.Name=="Renamed" && entry.Folder=="Shared" && WardrobeStore.IsAppearanceBase(entry),"upstream base discovery");
+        ((JArray)upstream["Tags"]!).Add("aetherloom");
+        Check(!WardrobeStore.IsAppearanceBase(WardrobeStore.Describe(baseId,"Original",upstream)),"wardrobe designs excluded");
+        upstream.Remove("Tags");
+        Check(!WardrobeStore.IsAppearanceBase(WardrobeStore.Describe(baseId,"Original",upstream)),"removed base tag");
+        Console.WriteLine("Wardrobe library migration and upstream base discovery checks passed.");
     }
 
-    internal static void Rehearse(string configRoot)
+    internal static void Rehearse(string configRoot,string? stagedFile=null)
     {
         var original=JObject.Parse(File.ReadAllText(Path.Combine(configRoot,"Aetherloom","wardrobe-plans.json")));
         var folder=Path.Combine(configRoot,"Glamourer");
@@ -48,7 +55,8 @@ internal static class MigrationChecks
         var entries=sources.Select(p=>new LibraryDesign(p.Key,p.Value.Value<string>("Name")!,p.Value["Tags"]?.ToObject<string[]>()??[],
             p.Value.Value<string>("FileSystemFolder")??"")).ToArray();
         var folders=((JObject)JObject.Parse(File.ReadAllText(Path.Combine(folder,"design_filesystem","organization.json")))["Folders"]!).Properties().Select(p=>p.Name).ToArray();
-        var result=WardrobeStore.Migrate(original,entries,folders,id=>sources[id]);
+        var result=WardrobeStore.MigrateFromDesigns(original,entries.ToDictionary(e=>e.Id,e=>e.Name),folders,id=>sources[id]);
+        Check(JToken.DeepEquals(result,WardrobeStore.Migrate(original,entries,folders,id=>sources[id])),"upstream migration differs from fork migration");
         var plans=(JObject)result["Plans"]!;
         var expected=new HashSet<uint>();
         var tagged=entries.Where(e=>WardrobeLibrary.Tagged(e.Tags,WardrobeLibrary.Tag)).ToArray();
@@ -70,6 +78,11 @@ internal static class MigrationChecks
         foreach(var key in new[]{"Assignments","AssignmentMode","FavouriteDesigns"})
             Check(JToken.DeepEquals(original[key],result[key]),key);
         Check(result["Folders"]!.Values<string>().ToHashSet().SetEquals(folders.Where(WardrobeLibrary.Managed)),"folder list");
+        if(stagedFile!=null)
+        {
+            using var output=new StreamWriter(File.Open(stagedFile,FileMode.CreateNew));
+            output.Write(result.ToString());
+        }
         Console.WriteLine($"Read-only rehearsal passed for {plans.Count} designs, {result["Folders"]!.Count()} folders and {expected.Count} distinct item references before game-sheet validation.");
     }
     private static void Check(bool condition,string detail)

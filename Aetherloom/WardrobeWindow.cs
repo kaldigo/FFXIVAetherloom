@@ -27,7 +27,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     private JObject saved=new(), design=new();
     private Dictionary<Guid,LibraryDesign> library=[];
     private long nextRefresh;
-    private string? lastSnapshot;
+    private JObject? previewBaseLook;
     private bool LocalReady=>WardrobeStore.IsLocal(saved);
     public IReadOnlyCollection<string> Folders {get;private set;}=[];
     public IEnumerable<LibraryDesign> Designs=>library.Values;
@@ -67,7 +67,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     }
     public override void PreDraw()=>WindowShell.PushHostStyle();
     public override void PostDraw()=>WindowShell.PopHostStyle();
-    public override void OnOpen(){ lastSnapshot=null;Refresh(); preview.Start(); }
+    public override void OnOpen(){ projection=null;Refresh(); preview.Start(); }
     public override void OnClose()=>preview.Close();
     public override void Draw()
     {
@@ -78,35 +78,48 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         preview.WindowOrigin=ImGui.GetWindowPos();preview.WindowSize=ImGui.GetWindowSize();
         layout.Draw(()=>IsOpen=false);
     }
-    private const string Api="Aether.Glamourer.";
+    private Dictionary<Guid,string> GlamourerDesigns()
+        =>plugin.GetIpcSubscriber<Dictionary<Guid,string>>("Glamourer.GetDesignList").InvokeFunc()
+            ??throw new InvalidDataException("Glamourer returned no design list.");
+
+    private JObject? GlamourerDesign(Guid id)
+        =>plugin.GetIpcSubscriber<Guid,JObject?>("Glamourer.GetDesignJObject").InvokeFunc(id);
+
     private void Refresh()
     {
         nextRefresh=Environment.TickCount64+1200;
         try
         {
-            var snapshot=plugin.GetIpcSubscriber<string>(Api+"DesignLibrary").InvokeFunc();
-            if(snapshot==lastSnapshot && LocalReady){if(projectionError!=null)projection=null;return;}
-            var root=JObject.Parse(snapshot);
-            var entries=root["Designs"]?.ToObject<LibraryDesign[]>()??throw new InvalidDataException("Missing Glamourer design list.");
-            if(!LocalReady)
+            if(!LocalReady)MigrateFromGlamourer();
+            if(IsOpen && LinkedBase.HasValue && projection!=null)
             {
-                var folders=root["Folders"]?.ToObject<string[]>()??throw new InvalidDataException("Missing Glamourer folders.");
-                var candidate=WardrobeStore.Migrate(Document(),entries,folders,
-                    id=>plugin.GetIpcSubscriber<Guid,JObject?>("Glamourer.GetDesignJObject").InvokeFunc(id));
-                if(File.Exists(file) && !File.Exists(file+".pre-local.bak"))File.Copy(file,file+".pre-local.bak");
-                Commit(candidate);
+                bool found=ReadBase(design,out var look,out var error);
+                if(!JToken.DeepEquals(look,previewBaseLook) || projectionError!=(found?null:error))
+                    projection=null;
             }
-            bases=entries.Where(d=>WardrobeLibrary.Tagged(d.Tags,BaseTag) && !WardrobeLibrary.Tagged(d.Tags,WardrobeLibrary.Tag))
-                .DistinctBy(d=>d.Id).ToDictionary(d=>d.Id);
-            projection=null;projectionError=null;
-            lastSnapshot=snapshot;
         }
         catch(Exception ex) when(ex is Dalamud.Plugin.Ipc.Exceptions.IpcError or IOException or UnauthorizedAccessException
             or InvalidDataException or Newtonsoft.Json.JsonException or ArgumentException)
         {
             if(!LocalReady)Message="Wardrobe migration pending: "+ex.Message;
-            if(lastSnapshot!=null){bases.Clear();lastSnapshot=null;projection=null;}
+            if(LinkedBase.HasValue)projection=null;
         }
+    }
+
+    private void MigrateFromGlamourer()
+    {
+        // The public IPC lists designs. Empty folders live in Glamourer's organization file.
+        var organization=Path.Combine(plugin.ConfigFile.DirectoryName!,"Glamourer","design_filesystem","organization.json");
+        string[] folders=[];
+        if(File.Exists(organization))
+        {
+            var index=JObject.Parse(File.ReadAllText(organization));
+            if(index["Folders"] is not JObject paths)throw new InvalidDataException("Could not read Glamourer's folder list.");
+            folders=paths.Properties().Select(p=>p.Name).ToArray();
+        }
+        var candidate=WardrobeStore.MigrateFromDesigns(Document(),GlamourerDesigns(),folders,GlamourerDesign);
+        if(File.Exists(file) && !File.Exists(file+".pre-local.bak"))File.Copy(file,file+".pre-local.bak");
+        Commit(candidate);
     }
 
     private void IndexLocal()
@@ -468,7 +481,9 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
             projection=(JObject)design.DeepClone();
             try
             {
-                if(ReadBase(design,out var baseLook,out var error))
+                bool found=ReadBase(design,out var baseLook,out var error);
+                previewBaseLook=baseLook;
+                if(found)
                 {
                     projection["Customize"]=WardrobeBase.Compose(baseLook,Look);
                     if(HasCharacter && CharacterSettings["AppliedFields"] is JObject ledger)projection["PreviousBase"]=ledger.DeepClone();

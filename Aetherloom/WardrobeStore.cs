@@ -5,6 +5,33 @@ namespace Aetherloom;
 
 internal static class WardrobeStore
 {
+    internal static LibraryDesign Describe(Guid id,string name,JObject source)
+    {
+        if(!Guid.TryParse(source.Value<string>("Identifier"),out var identifier) || identifier!=id)
+            throw new InvalidDataException($"Glamourer returned incomplete design metadata for '{name}'.");
+        return new(id,source.Value<string>("Name")??name,source["Tags"]?.ToObject<string[]>()??[],
+            source.Value<string>("FileSystemFolder")??"");
+    }
+
+    internal static bool IsAppearanceBase(LibraryDesign entry)
+        =>WardrobeLibrary.Tagged(entry.Tags,"aetherloom-base") && !WardrobeLibrary.Tagged(entry.Tags,WardrobeLibrary.Tag);
+
+    internal static JObject MigrateFromDesigns(JObject original,Dictionary<Guid,string> listed,string[] folders,Func<Guid,JObject?> read)
+    {
+        if(listed.Count==0 && original["Plans"] is JObject { Count: > 0 })throw new InvalidDataException("Waiting for the Glamourer library.");
+        var entries=new List<LibraryDesign>();
+        var sources=new Dictionary<Guid,JObject>();
+        foreach(var (id,name) in listed)
+        {
+            var source=read(id)??throw new InvalidDataException($"Could not read '{name}'.");
+            var entry=Describe(id,name,source);
+            entries.Add(entry);
+            if(original["Plans"]?[id.ToString()]==null && entry.Tags.Any(t=>!WardrobeLibrary.VisibleTag(t)))sources[id]=source;
+        }
+
+        return Migrate(original,entries.ToArray(),folders,id=>sources.GetValueOrDefault(id));
+    }
+
     internal static bool IsLocal(JObject document)=>document.Value<int?>("LibraryVersion")==1;
 
     internal static JObject Migrate(JObject original, LibraryDesign[] entries, string[] folders, Func<Guid,JObject?> fetch)
