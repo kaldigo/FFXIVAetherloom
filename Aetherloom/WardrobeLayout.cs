@@ -123,7 +123,7 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         } finally { ImGui.PopStyleColor(6); }
     }
     private void Body()=>WorkspaceControls.Split("wardrobe-panes",
-        new("designs",250,Sidebar,true),new("editor",1,Editor),new("character",345,PreviewPanel,true,true));
+        new("designs",250,Sidebar,true,true),new("editor",1,Editor),new("character",345,PreviewPanel,true,true));
 
     private static readonly (string Key,string Label,Vector2[][] Paths)[] PreviewActions=[
         ("Weapon","Display sheathed arms",[[new(-.23f,-.25f),new(.16f,.14f),new(.09f,.2f),new(-.23f,-.25f)],[new(.02f,.18f),new(.2f,0)],[new(.12f,.12f),new(.24f,.24f)]]),
@@ -170,7 +170,13 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
     private bool focusName;
     private void Sidebar()
     {
-
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY()+4*S+ImGui.GetStyle().CellPadding.Y);
+        ImGui.Indent(5*S);
+        try { DrawSidebar(); }
+        finally { ImGui.Unindent(5*S); }
+    }
+    private void DrawSidebar()
+    {
         if(revealed!=wardrobe.Selected)
         {
             revealed=wardrobe.Selected;
@@ -222,7 +228,9 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         var matching=SearchAndFilters();
         bool filtering=!string.IsNullOrWhiteSpace(filter) || FilterCount>0;
         ImGui.Spacing();ImGui.Separator();
+        ImGui.PushStyleVar(ImGuiStyleVar.ScrollbarSize,8*S);
         bool visible=ImGui.BeginChild("wardrobe-library",Vector2.Zero);
+        ImGui.PopStyleVar();
         try { if(visible)DrawLibrary(matching,filtering); }
         finally { ImGui.EndChild(); }
     }

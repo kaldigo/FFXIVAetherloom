@@ -1,1 +1,1 @@
-The wardrobe sidebar keeps its actions, search, and filter button fixed while the library scrolls. Only available glamours filters applied gear by the race and gender currently displayed by Glamourer, regardless of ownership.
+The wardrobe sidebar has a smaller left inset and runs flush to the divider on the right. The scrolling design list now uses a slimmer scrollbar.
