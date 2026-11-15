@@ -91,8 +91,7 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         try {
         shell.Draw("Aetherloom","",[new Destination("wardrobe","Wardrobe","",Body)],(p,size)=>{
             if (wardrobe.HeaderMark is not {} mark) return;
-            var position=new Vector2(ImGui.GetWindowPos().X+ImGui.GetWindowWidth()-3*size,p.Y);
-            ImGui.GetWindowDrawList().AddImage(mark,position,position+new Vector2(size));
+            ImGui.GetWindowDrawList().AddImage(mark,p,p+new Vector2(size));
         });
         } finally { ImGui.PopStyleColor(6); }
     }
