@@ -12,10 +12,20 @@ internal record WardrobeDye(byte Id,string Name,uint Color,int Family)
 }
 internal record WardrobeStyle(byte Id,string Name,uint Icon);
 internal record WardrobeSlot(string Key,string Label,WardrobeItem Item,byte First,byte Second,bool Apply);
+internal sealed record LibraryDesign(Guid Id,string Name,string[] Tags,string Folder="",DateTimeOffset LastEdit=default);
+internal static class WardrobeLibrary
+{
+    internal const string Tag="aetherloom";
+    internal const string LegacyTag="ui-wardrobe";
+    internal static bool Tagged(IEnumerable<string> tags,string tag)=>tags.Contains(tag,StringComparer.OrdinalIgnoreCase);
+    internal static bool Managed(string path)=>path.StartsWith("[AL]",StringComparison.OrdinalIgnoreCase) && path.Split('/')[0][4..].Trim().Length>0;
+    internal static string Parent(string path)=>path.LastIndexOf('/') is var split && split>=0?path[..split]:"";
+    internal static string Label(string path)=>path.Contains('/')?path[(path.LastIndexOf('/')+1)..]:path[4..].TrimStart();
+}
 internal interface IWardrobe
 {
     ImTextureID? HeaderMark => null;
-    IEnumerable<(Guid Id,string Name,string[] Tags)> Designs { get; }
+    IEnumerable<LibraryDesign> Designs { get; }
     Guid Selected { get; }
     string Title { get; }
     string Message { get; }
@@ -29,8 +39,10 @@ internal interface IWardrobe
     Picture? Icon(uint icon);
     string Availability(uint item);
     void Select(Guid id);
-    void Refresh();
-    void Create(string name);
+    IReadOnlyCollection<string> Folders { get; }
+    bool Create(string name,string folder);
+    bool CreateFolder(string parent,string name);
+    void MoveDesign(Guid id,string folder);
     void Tag(string tag,bool add);
     void SetItem(string key,uint id);
     void SetDye(string key,int channel,byte dye);
@@ -85,7 +97,7 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         } finally { ImGui.PopStyleColor(6); }
     }
     private void Body()=>WorkspaceControls.Split("wardrobe-panes",
-        new("designs",205,Sidebar,true),new("editor",1,Editor),new("character",345,PreviewPanel,true,true));
+        new("designs",250,Sidebar,true),new("editor",1,Editor),new("character",345,PreviewPanel,true,true));
 
     private static readonly (string Key,string Label,Vector2[][] Paths)[] PreviewActions=[
         ("Weapon","Display sheathed arms",[[new(-.23f,-.25f),new(.16f,.14f),new(.09f,.2f),new(-.23f,-.25f)],[new(.02f,.18f),new(.2f,0)],[new(.12f,.12f),new(.24f,.24f)]]),
@@ -127,30 +139,103 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         ImGui.Dummy(new Vector2(0,5*S));
     }
 
+    private Guid revealed;
+    private string folder="";
+    private string folderName="";
+    private readonly HashSet<string> expanded=[];
     private void Sidebar()
     {
         Heading("Wardrobe");
-        if(ImGui.Button("+  New design",new Vector2(-1,32*S))) { newName=""; ImGui.OpenPopup("new-design"); }
+        if(revealed!=wardrobe.Selected)
+        {
+            revealed=wardrobe.Selected;
+            var path=wardrobe.Designs.FirstOrDefault(d=>d.Id==revealed)?.Folder??"";
+            folder=WardrobeLibrary.Managed(path)?path:"";
+            for(var current=folder;current.Length>0;current=WardrobeLibrary.Parent(current))expanded.Add(current);
+        }
+        if(!wardrobe.Folders.Contains(folder))folder="";
+        if(ImGui.Button("+ New design")){newName="";ImGui.OpenPopup("new-design");}
+        ImGui.SameLine();
+        if(ImGui.Button("+ Folder")){folderName="";ImGui.OpenPopup("new-folder");}
         if(ImGui.BeginPopup("new-design"))
         {
             ImGui.InputTextWithHint("##name","Design name",ref newName,80);
-            if(newName.Trim().Length>0 && ImGui.Button("Create")) { wardrobe.Create(newName.Trim()); ImGui.CloseCurrentPopup(); }
+            if(newName.Trim().Length>0 && ImGui.Button("Create") && wardrobe.Create(newName.Trim(),folder))
+                ImGui.CloseCurrentPopup();
             ImGui.EndPopup();
         }
-        ImGui.SetNextItemWidth(-1); ImGui.InputTextWithHint("##filter","Filter names or tags",ref filter,128);
-        ImGui.Spacing();
-        var terms=filter.Split(' ',StringSplitOptions.RemoveEmptyEntries);
-        foreach(var (id,name,tags) in wardrobe.Designs)
+        if(ImGui.BeginPopup("new-folder"))
         {
-            if(!terms.All(word=>name.Contains(word,StringComparison.OrdinalIgnoreCase)||tags.Any(t=>t.Contains(word,StringComparison.OrdinalIgnoreCase)))) continue;
-            if(ImGui.Selectable(name+"###"+id,id==wardrobe.Selected,0,new Vector2(0,30*S))) wardrobe.Select(id);
+            ImGui.InputTextWithHint("##name","Folder name",ref folderName,80);
+            if(folderName.Trim().Length>0 && ImGui.Button("Create") && wardrobe.CreateFolder(folder,folderName.Trim()))
+            {
+                expanded.Add(folder);
+                folder=folder.Length==0?"[AL] "+folderName.Trim():folder+"/"+folderName.Trim();
+                expanded.Add(folder);
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndPopup();
         }
-        ImGui.Spacing(); if(ImGui.SmallButton("Refresh designs")) wardrobe.Refresh();
+        ImGui.SetNextItemWidth(-1);ImGui.InputTextWithHint("##filter","Filter names or tags",ref filter,128);
+        if(ImGui.Selectable("Wardrobe root###root",folder.Length==0))folder="";
+        DropOn("");
+        var terms=filter.Split(' ',StringSplitOptions.RemoveEmptyEntries);
+        var designs=wardrobe.Designs.Where(d=>terms.All(word=>d.Name.Contains(word,StringComparison.OrdinalIgnoreCase)
+            || d.Tags.Any(t=>t.Contains(word,StringComparison.OrdinalIgnoreCase)))).OrderBy(d=>d.Name,StringComparer.OrdinalIgnoreCase)
+            .ToLookup(d=>WardrobeLibrary.Managed(d.Folder)?d.Folder:"");
+        var folders=wardrobe.Folders.Order(StringComparer.OrdinalIgnoreCase).ToLookup(WardrobeLibrary.Parent);
+        var matches=new HashSet<string>();
+        if(terms.Length!=0)
+            foreach(var group in designs)
+                for(var ancestor=group.Key;ancestor.Length>0;ancestor=WardrobeLibrary.Parent(ancestor))matches.Add(ancestor);
+        DrawBranch("");
+        void DrawBranch(string parent)
+        {
+            foreach(var child in folders[parent])
+            {
+                if(terms.Length>0 && !matches.Contains(child))continue;
+                var open=terms.Length>0||expanded.Contains(child);
+                if(ImGui.Selectable((open?"v  ":">  ")+WardrobeLibrary.Label(child)+"###folder/"+child,folder==child))
+                {
+                    folder=child;
+                    if(!expanded.Add(child))expanded.Remove(child);
+                }
+                DropOn(child);
+                if(open){ImGui.Indent(12*S);DrawBranch(child);ImGui.Unindent(12*S);}
+            }
+            foreach(var item in designs[parent])
+            {
+                if(ImGui.Selectable(item.Name+"###"+item.Id,item.Id==wardrobe.Selected,0,new Vector2(0,26*S)))
+                {wardrobe.Select(item.Id);folder=parent;}
+                Drag(item);
+            }
+        }
+        if(wardrobe.Message.Length>0)ImGui.TextWrapped(wardrobe.Message);
+    }
+    private static void Drag(LibraryDesign design)
+    {
+        if(!ImGui.BeginDragDropSource())return;
+        Span<byte> id=stackalloc byte[16];
+        design.Id.TryWriteBytes(id);
+        ImGui.SetDragDropPayload("AETHERLOOM_DESIGN",id);
+        ImGui.TextUnformatted(design.Name);
+        ImGui.EndDragDropSource();
+    }
+    private unsafe void DropOn(string path)
+    {
+        if(!ImGui.BeginDragDropTarget())return;
+        var payload=ImGui.AcceptDragDropPayload("AETHERLOOM_DESIGN");
+        if(payload.Handle!=null && payload.DataSize==sizeof(Guid) && payload.IsDelivery())
+        {
+            wardrobe.MoveDesign(*(Guid*)payload.Data,path);
+            expanded.Add(path);
+        }
+        ImGui.EndDragDropTarget();
     }
 
     private void Editor()
     {
-        if(wardrobe.Selected==Guid.Empty){ImGui.TextWrapped("Create a design or refresh designs from Glamourer.");return;}
+        if(wardrobe.Selected==Guid.Empty){ImGui.TextWrapped("Create a design or add the aetherloom tag to a design in Glamourer.");return;}
         Heading(wardrobe.Title);
         foreach(var jobs in wardrobe.Slots(false).Where(x=>x.Key.StartsWith("MainHand")).Select(x=>x.Item.Jobs).Where(x=>x.Length>0).Distinct())
         {ImGui.TextColored(new Vector4(.41f,.86f,.79f,1),jobs); ImGui.SameLine();}
@@ -202,7 +287,7 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
             ImGui.Button("Apply to character"); if(Tab=="Gear"){ImGui.SameLine();ImGui.Button("Copy to glamour plate");}
             ImGui.EndDisabled();
         }
-        if(wardrobe.Message.Length>0) ImGui.TextWrapped(wardrobe.Message);
+
     }
     private string? startupTab;
     internal void Show(string tab,string? picker=null){startupTab=tab;OpenPicker=picker;}

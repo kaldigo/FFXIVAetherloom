@@ -1,1 +1,1 @@
-The wardrobe preview now fills its pane edge to edge, uses the visible character model as its appearance baseline, and holds the previous image and camera framing through gear and design changes.
+The wider wardrobe sidebar shows designs tagged aetherloom, mirrors Glamourer folders beginning with [AL], and supports folder creation and drag-and-drop. Update the Glamourer fork alongside Aetherloom. Old ui-wardrobe plans migrate with their existing design IDs.

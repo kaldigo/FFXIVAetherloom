@@ -6,9 +6,9 @@ Aetherloom is a separate Dalamud companion to Glamourer. Open it with `/aetherlo
 
 Use the new window for the everyday loop of choosing an outfit, editing it, and applying it. A Settings / Advanced action opens the existing Glamourer window with its full controls. The companion stores the full outfit and maps each character to an ownership-filtered Glamourer copy by ID. Glamourer job automation points directly to that copy. Refresh it in place when the plan or ownership changes. The companion handles zone overrides.
 
-Mark generated Glamourer designs with an ordinary design tag, provisionally `ui-wardrobe`. Wardrobe adds it automatically whenever it creates a design. Importing an existing upstream design would require an explicit copy of the full plan before applying the ownership filter. Use an exact, case-insensitive tag match for membership.
+Mark generated Glamourer designs with an ordinary design tag, `aetherloom`. Wardrobe adds it automatically whenever it creates a design. Importing an existing upstream design would require an explicit copy of the full plan before applying the ownership filter. Use an exact, case-insensitive tag match for membership.
 
-In the full Designs window, `-t:ui-wardrobe` filters out tagged designs and `t:ui-wardrobe` finds them. The existing search matches tag substrings, so reserve this tag text for membership.
+In the full Designs window, `-t:aetherloom` filters out tagged designs and `t:aetherloom` finds them. The existing search matches tag substrings, so reserve this tag text for membership.
 
 ## Window layout
 
@@ -16,7 +16,7 @@ The fork exposes `Aether.Glamourer.UpdateDesign(Guid id, string json) -> int` on
 
 | Area | Contents |
 | --- | --- |
-| Left sidebar | Wardrobe-tagged designs in a flat list, regardless of folder. Filter by additional tags. Clearing filters restores the full Wardrobe list. |
+| Left sidebar | 250-pixel design tree. Show designs with the exact aetherloom tag. Mirror top-level [AL] folders and their descendants, hiding the prefix. Tagged designs elsewhere appear at the root. Search design names and tags, create folders and drag designs to a folder or the root. |
 | Design header | Design name, a read-only job tag derived from the selected main-hand weapon, editable outfit tags, and Apply to character. Use the remaining header width for tags. Keep these controls visible on every tab. |
 | Gear tab | Equipped appearance for weapons and armor, both dye channels where supported, and per-slot application controls. Show the existing missing-item border and tooltip beside the affected selector. Place Copy to glamour plate here. |
 | Accessories tab | Earrings, necklace, bracelets, right ring and left ring. Use the same slot controls and missing-item border as Gear. Read each item’s dye-channel count and display zero, one or two editable swatches accordingly. |

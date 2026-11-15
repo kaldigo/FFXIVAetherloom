@@ -25,7 +25,13 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     private readonly WardrobeLayout layout;
     private readonly string file;
     private JObject saved=new(), design=new();
-    private Dictionary<Guid,string> names=[];
+    private Dictionary<Guid,LibraryDesign> library=[];
+    private long nextRefresh;
+    private string? lastSnapshot;
+    private bool disconnected;
+    public IReadOnlyCollection<string> Folders {get;private set;}=[];
+    public IEnumerable<LibraryDesign> Designs=>library.Values;
+
     private readonly Dictionary<string,List<WardrobeItem>> catalogs=[];
     private readonly Dictionary<uint,WardrobeItem> known=[];
     private readonly Dictionary<(byte,byte,byte,string),WardrobeStyle[]> styles=[];
@@ -36,10 +42,9 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     private static readonly string[] Accessories=["Ears","Neck","Wrists","RFinger","LFinger"];
     private static readonly Dictionary<string,string> Labels=new(){["MainHand"]="Main hand",["OffHand"]="Off hand",["Ears"]="Earrings",["Neck"]="Necklace",["Wrists"]="Bracelets",["RFinger"]="Right ring",["LFinger"]="Left ring"};
     public Guid Selected {get;private set;}
-    public string Title=>names.GetValueOrDefault(Selected)??"";
+    public string Title=>library.GetValueOrDefault(Selected)?.Name??"";
     public string Message {get;private set;}="";
-    public string[] Tags=>design["Tags"]?.Values<string>().OfType<string>().ToArray()??[];
-    public IEnumerable<(Guid,string,string[])> Designs=>names.OrderBy(x=>x.Value).Select(x=>(x.Key,x.Value,Plans[x.Key.ToString()]?["Tags"]?.Values<string>().OfType<string>().ToArray()??[]));
+    public string[] Tags=>library.GetValueOrDefault(Selected)?.Tags??[];
     private JObject Plans= new();
     private JObject assignments=new();
     public IEnumerable<WardrobeDye> Dyes=>dyes;
@@ -59,21 +64,89 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     }
     public override void PreDraw()=>WindowShell.PushHostStyle();
     public override void PostDraw()=>WindowShell.PopHostStyle();
-    public override void OnOpen(){ Refresh(); preview.Start(Selected!=Guid.Empty); }
+    public override void OnOpen(){ lastSnapshot=null;Refresh(); preview.Start(Selected!=Guid.Empty); }
     public override void OnClose()=>preview.Close();
     public override void Draw()
     {
+        if(Environment.TickCount64>=nextRefresh)Refresh();
         preview.WindowOrigin=ImGui.GetWindowPos();preview.WindowSize=ImGui.GetWindowSize();
         layout.Draw(()=>IsOpen=false);
     }
-    public void Refresh()
+    private const string Api="Aether.Glamourer.";
+    private void Refresh()
     {
-        Message="";
-        try {names=plugin.GetIpcSubscriber<Dictionary<Guid,string>>("Glamourer.GetDesignList.V2").InvokeFunc();}
-        catch(Dalamud.Plugin.Ipc.Exceptions.IpcError){names=[];Message="Enable Glamourer to load its designs.";}
-        foreach(var plan in Plans.Properties())
-            if(Guid.TryParse(plan.Name,out var id))names[id]=plan.Value.Value<string>("Name")??names.GetValueOrDefault(id)??"Design";
-        Select(names.ContainsKey(Selected)?Selected:names.OrderBy(x=>x.Value).Select(x=>x.Key).FirstOrDefault());
+        nextRefresh=Environment.TickCount64+1200;
+        try
+        {
+            var snapshot=plugin.GetIpcSubscriber<string>(Api+"DesignLibrary").InvokeFunc();
+            if(disconnected){disconnected=false;Message="";}
+            if(snapshot==lastSnapshot)return;
+            var root=JObject.Parse(snapshot);
+            var entries=root["Designs"]!.ToObject<LibraryDesign[]>()!;
+            var byId=entries.ToDictionary(x=>x.Id);
+            if(Migrate(byId))
+            {
+                snapshot=plugin.GetIpcSubscriber<string>(Api+"DesignLibrary").InvokeFunc();
+                root=JObject.Parse(snapshot);entries=root["Designs"]!.ToObject<LibraryDesign[]>()!;
+            }
+            var previous=library.GetValueOrDefault(Selected);
+            library=entries.Where(d=>WardrobeLibrary.Tagged(d.Tags,WardrobeLibrary.Tag)).ToDictionary(d=>d.Id);
+            Folders=root["Folders"]!.ToObject<string[]>()!.Where(WardrobeLibrary.Managed).ToArray();
+            lastSnapshot=snapshot;
+            if(!library.TryGetValue(Selected,out var selected))
+                Select(Designs.OrderBy(d=>d.Name).Select(d=>d.Id).FirstOrDefault());
+            else if(previous?.LastEdit!=selected.LastEdit && Plans[Selected.ToString()]==null)Select(Selected);
+        }
+        catch(Dalamud.Plugin.Ipc.Exceptions.IpcError)
+        {
+            disconnected=true;lastSnapshot=null;
+            Message="Update or enable the Glamourer fork to load the wardrobe.";
+        }
+    }
+    private bool Migrate(Dictionary<Guid,LibraryDesign> remote)
+    {
+        bool changed=false,dirty=false;
+        var pending=Plans.Properties().Where(p=>p.Value is JObject plan && !plan.Value<bool>("LibraryLinked")
+            && WardrobeLibrary.Tagged(plan["Tags"]?.ToObject<string[]>()??[],WardrobeLibrary.LegacyTag)).ToArray();
+        foreach(var property in pending)
+        {
+            if(!Guid.TryParse(property.Name,out var id))continue;
+            var plan=(JObject)property.Value;
+            var tags=plan["Tags"]!.ToObject<string[]>()!.Where(t=>!t.Equals(WardrobeLibrary.LegacyTag,StringComparison.OrdinalIgnoreCase))
+                .Append(WardrobeLibrary.Tag).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if(!remote.ContainsKey(id))
+            {
+                if(!Call(()=>CreateRemote(id,plan.Value<string>("Name")??"Design","",tags)))continue;
+                changed=true;
+            }
+            else
+            {
+                bool success=true;
+                foreach(var tag in tags.Where(t=>!WardrobeLibrary.Tagged(remote[id].Tags,t)))
+                {
+                    if(!Call(()=>SetTag(id,tag,true))){success=false;break;}
+                    changed=true;
+                }
+                if(!success)continue;
+            }
+            plan["LibraryLinked"]=true;plan["Tags"]=new JArray(tags);dirty=true;
+        }
+        foreach(var entry in remote.Values.Where(d=>WardrobeLibrary.Tagged(d.Tags,WardrobeLibrary.LegacyTag)))
+        {
+            if(!WardrobeLibrary.Tagged(entry.Tags,WardrobeLibrary.Tag) && !Call(()=>SetTag(entry.Id,WardrobeLibrary.Tag,true)))continue;
+            if(Call(()=>SetTag(entry.Id,WardrobeLibrary.LegacyTag,false)))changed=true;
+        }
+        if(dirty)Write();
+        return changed;
+    }
+    private string CreateRemote(Guid id,string name,string parent,string[] tags)
+        =>plugin.GetIpcSubscriber<Guid,string,string,string[],string>(Api+"CreateLinkedDesign").InvokeFunc(id,name,parent,tags);
+    private string SetTag(Guid id,string tag,bool add)
+        =>plugin.GetIpcSubscriber<Guid,string,bool,string>(Api+"SetDesignTag").InvokeFunc(id,tag,add);
+    private bool Call(Func<string> action)
+    {
+        try {Message=action();return Message.Length==0;}
+        catch(Dalamud.Plugin.Ipc.Exceptions.IpcError){Message="Update or enable the Glamourer fork to edit the wardrobe.";return false;}
     }
     public void Select(Guid id)
     {
@@ -86,7 +159,7 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     }
     private void Save()
     {
-        projection=null;design["Name"]=Title;Plans[Selected.ToString()]=design.DeepClone();
+        projection=null;design["LibraryLinked"]=true;design["Tags"]=new JArray(Tags);design["Name"]=Title;Plans[Selected.ToString()]=design.DeepClone();
         Write();
     }
     private void Write()
@@ -95,15 +168,26 @@ internal sealed class WardrobeWindow : Window, IWardrobe
         try{Directory.CreateDirectory(Path.GetDirectoryName(file)!);File.WriteAllText(file+".tmp",saved.ToString());File.Move(file+".tmp",file,true);Message="";}
         catch(IOException){Message="Could not save the wardrobe edit to disk.";}
     }
-    public void Create(string name)
+    public bool Create(string name,string folder)
     {
-        var id=Guid.NewGuid();names[id]=name;Selected=id;previewHand="MainHand";
-        design=new JObject{["Equipment"]=new JObject(),["Customize"]=new JObject(),["Tags"]=new JArray("ui-wardrobe")};Save();
+        var id=Guid.NewGuid();
+        if(!Call(()=>CreateRemote(id,name,folder,[WardrobeLibrary.Tag])))return false;
+        design=new JObject{["Equipment"]=new JObject(),["Customize"]=new JObject(),["Tags"]=new JArray(WardrobeLibrary.Tag),["LibraryLinked"]=true,["Name"]=name};
+        Plans[id.ToString()]=design.DeepClone();Write();
+        Refresh();Select(id);return true;
+    }
+    public bool CreateFolder(string parent,string name)
+    {
+        if(!Call(()=>plugin.GetIpcSubscriber<string,string,string>(Api+"CreateFolder").InvokeFunc(parent,parent.Length==0?"[AL] "+name:name)))return false;
+        Refresh();return true;
+    }
+    public void MoveDesign(Guid id,string folder)
+    {
+        if(library.ContainsKey(id) && Call(()=>plugin.GetIpcSubscriber<Guid,string,string>(Api+"MoveDesign").InvokeFunc(id,folder)))Refresh();
     }
     public void Tag(string tag,bool add)
     {
-        var tags=Tags.ToList();tags.RemoveAll(t=>t.Equals(tag,StringComparison.OrdinalIgnoreCase));if(add)tags.Add(tag);
-        design["Tags"]=new JArray(tags);Save();
+        if(Call(()=>SetTag(Selected,tag,add)))Refresh();
     }
     private JObject Equipment=>(JObject)(design["Equipment"]??=new JObject());
     private JObject Look=>(JObject)(design["Customize"]??=new JObject());

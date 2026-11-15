@@ -11,7 +11,7 @@ runs:
       uses: actions/checkout@v4
       with:
         repository: kaldigo/FFXIV-AetherglassUI
-        ref: fa2427802aa41a6da5c6015d0abad327700d75e9
+        ref: d20d6d6c9c8173a4f7044ffbc124d8828bf44ceb
         path: vendor/AetherglassUI
         persist-credentials: false
     - uses: actions/setup-dotnet@v4
