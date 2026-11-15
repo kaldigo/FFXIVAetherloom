@@ -1,10 +1,7 @@
-using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
-using Lumina.Excel.Sheets;
-using Newtonsoft.Json.Linq;
 
 namespace Aetherloom;
 
@@ -19,13 +16,13 @@ public sealed class Plugin : IDalamudPlugin
 
     public Plugin(IDalamudPluginInterface plugin, ICommandManager commands, IFramework framework,
         IPlayerState player, IClientState client, IDataManager data, IPluginLog log,
-        IGameGui gameGui, ICondition conditions, IObjectTable objects, IAddonLifecycle addons)
+        IGameGui gameGui, ICondition conditions, IObjectTable objects, IAddonLifecycle addons, ITextureProvider textures)
     {
         this.plugin = plugin;
         this.commands = commands;
         ownership = new(framework, player, client, plugin, data, log);
         preview = new(framework, gameGui, conditions, objects, addons, log, data);
-        window = new(plugin, data, ownership, preview);
+        window = new(plugin, data, ownership, preview, textures, objects);
         windows.AddWindow(window);
         plugin.UiBuilder.Draw += windows.Draw;
         plugin.UiBuilder.OpenMainUi += Open;
@@ -45,98 +42,5 @@ public sealed class Plugin : IDalamudPlugin
         windows.RemoveAllWindows();
         preview.Dispose();
         ownership.Dispose();
-    }
-}
-
-internal sealed class WardrobeWindow(IDalamudPluginInterface plugin, IDataManager data, WardrobeOwnership ownership, CharacterPreview preview)
-    : Window("Aetherloom")
-{
-    private Dictionary<Guid, string> designs = [];
-    private Guid selected;
-    private JObject? design;
-    private JObject? equipment => design?["Equipment"] as JObject;
-    private string? error;
-
-    public override void OnClose() => preview.Close();
-
-    public override void OnOpen() => Refresh();
-
-    private void Refresh()
-    {
-        try
-        {
-            designs = plugin.GetIpcSubscriber<Dictionary<Guid, string>>("Glamourer.GetDesignList.V2").InvokeFunc();
-            if (!designs.ContainsKey(selected))
-                selected = designs.OrderBy(d => d.Value).Select(d => d.Key).FirstOrDefault();
-            ReadDesign();
-        }
-        catch (Dalamud.Plugin.Ipc.Exceptions.IpcError)
-        {
-            designs.Clear();
-            design = null;
-            error = "Enable Glamourer, then refresh designs.";
-        }
-    }
-
-    private void ReadDesign()
-    {
-        try
-        {
-            design = selected == Guid.Empty ? null : plugin.GetIpcSubscriber<Guid, JObject?>("Glamourer.GetDesignJObject")
-                .InvokeFunc(selected);
-            error = equipment == null && selected != Guid.Empty ? "Design unavailable. Refresh designs." : null;
-        }
-        catch (Dalamud.Plugin.Ipc.Exceptions.IpcError)
-        {
-            design = null;
-            error = "Glamourer is unavailable. Refresh designs.";
-        }
-    }
-
-    public override void Draw()
-    {
-        if (ImGui.Button("Refresh designs")) Refresh();
-        if (designs.Count == 0)
-        {
-            ImGui.TextUnformatted(error ?? "No saved designs in Glamourer. Save a design there, then refresh.");
-            preview.Draw();
-            return;
-        }
-        ImGui.SameLine();
-        ImGui.TextUnformatted($"{designs.Count} saved {(designs.Count == 1 ? "design" : "designs")}");
-        if (ImGui.BeginCombo("Design", designs.GetValueOrDefault(selected) ?? "Select design"))
-        {
-            foreach (var (id, name) in designs.OrderBy(d => d.Value))
-            {
-                if (!ImGui.Selectable($"{name}##{id}", id == selected)) continue;
-                selected = id;
-                ReadDesign();
-            }
-            ImGui.EndCombo();
-        }
-        preview.Draw(design);
-        if (error != null) { ImGui.TextUnformatted(error); return; }
-        if (ownership.Character == 0) { ImGui.TextUnformatted("Log in to check this character’s equipment."); return; }
-        if (equipment == null || !ImGui.BeginTable("Equipment", 3)) return;
-        ImGui.TableSetupColumn("Slot");
-        ImGui.TableSetupColumn("Item");
-        ImGui.TableSetupColumn("Availability");
-        ImGui.TableHeadersRow();
-        foreach (var slot in equipment.Properties())
-        {
-            if (slot.Value is not JObject item || item["ItemId"]?.Type != JTokenType.Integer) continue;
-            var id = item.Value<ulong>("ItemId");
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn(); ImGui.TextUnformatted(slot.Name);
-            ImGui.TableNextColumn();
-            if (id > uint.MaxValue || !data.GetExcelSheet<Item>().TryGetRow((uint)id, out var row) || id == 0)
-            {
-                ImGui.TextUnformatted("Empty or custom slot");
-                continue;
-            }
-            ImGui.TextUnformatted(row.Name.ExtractText());
-            ImGui.TableNextColumn(); ImGui.TextUnformatted(ownership.Availability((uint)id));
-        }
-        ImGui.EndTable();
     }
 }

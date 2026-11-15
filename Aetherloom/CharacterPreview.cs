@@ -1,6 +1,5 @@
 using System.Numerics;
-using System.Drawing;
-using System.Runtime.InteropServices;
+using AetherglassUI;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
@@ -38,16 +37,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
     private enum Background { GameDefault, Black, White }
     private static readonly string[] BackgroundNames = ["Game default (grey)", "Black", "White"];
     private int background;
-    private nint dragWindow;
-    private Point dragOrigin;
-    private ImGuiMouseButton dragButton;
-
-    [DllImport("user32.dll")]
-    private static extern bool GetCursorPos(out Point point);
-    [DllImport("user32.dll")]
-    private static extern bool SetCursorPos(int x, int y);
-    [DllImport("user32.dll")]
-    private static extern nint GetForegroundWindow();
+    private readonly PreviewCameraInput cameraInput = new();
     private bool requested;
     private nint player, textureId;
     private float aspect;
@@ -67,9 +57,11 @@ internal sealed unsafe class CharacterPreview : IDisposable
         addons.RegisterListener(AddonEvent.PreSetup, "BannerParty", OnPartyPortraits);
     }
 
+    public void Start(bool design) { requested=true; previewDesign=design; status=""; }
+
     public void Close()
     {
-        EndDrag();
+        cameraInput.EndDrag();
         requested = false;
         textureId = 0;
         status = "";
@@ -109,52 +101,15 @@ internal sealed unsafe class CharacterPreview : IDisposable
             return;
         }
 
-        var width = Math.Min(ImGui.GetContentRegionAvail().X, 380 * ImGui.GetIO().FontGlobalScale * aspect);
-        if (width <= 0) return;
-        ImGui.InvisibleButton("##character-camera", new Vector2(width, width / aspect),
-            ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight);
-        var drawList = ImGui.GetWindowDrawList();
-        var min = ImGui.GetItemRectMin();
-        var max = ImGui.GetItemRectMax();
-        drawList.AddImage(new ImTextureID((ulong)textureId), min, max);
-        var io = ImGui.GetIO();
-        if (ImGui.IsItemHovered())
+        WorkspaceControls.Viewport("##character-camera",new Picture(new ImTextureID((ulong)textureId)),aspect,()=>
         {
-            ImGuiP.SetItemUsingMouseWheel();
-            zoomDelta -= io.MouseWheel;
-        }
-        HandleCameraDrag(io.FontGlobalScale);
+            var io=ImGui.GetIO();
+            if(ImGui.IsItemHovered()) { ImGuiP.SetItemUsingMouseWheel(); zoomDelta-=io.MouseWheel; }
+            cameraInput.Read(io.FontGlobalScale,ref rotate,ref pan);
+        },95*WorkspaceControls.Scale);
         ImGui.TextDisabled("Left-drag to rotate, right-drag to pan, scroll to zoom.");
         ImGui.Combo("Preview backdrop", ref background, BackgroundNames, BackgroundNames.Length);
         if (notes.Length > 0) ImGui.TextWrapped(notes);
-    }
-
-    private void HandleCameraDrag(float scale)
-    {
-        if (ImGui.IsItemActivated() && GetCursorPos(out dragOrigin))
-        {
-            dragWindow = GetForegroundWindow();
-            dragButton = ImGui.IsMouseClicked(ImGuiMouseButton.Right) ? ImGuiMouseButton.Right : ImGuiMouseButton.Left;
-        }
-        if (dragWindow == 0) return;
-        if (GetForegroundWindow() != dragWindow || !ImGui.IsItemActive() || !ImGui.IsMouseDown(dragButton))
-        {
-            EndDrag();
-            return;
-        }
-        ImGui.SetMouseCursor(ImGuiMouseCursor.None);
-        if (!GetCursorPos(out var cursor) || cursor == dragOrigin) return;
-        var delta = new Vector2(cursor.X - dragOrigin.X, cursor.Y - dragOrigin.Y) / scale;
-        if (dragButton == ImGuiMouseButton.Left) rotate += delta;
-        else pan += new Vector2(delta.X, -delta.Y);
-        SetCursorPos(dragOrigin.X, dragOrigin.Y);
-    }
-
-    private void EndDrag()
-    {
-        if (dragWindow != 0 && GetForegroundWindow() == dragWindow)
-            SetCursorPos(dragOrigin.X, dragOrigin.Y);
-        dragWindow = 0;
     }
 
     private void Update(IFramework _)
@@ -333,7 +288,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
 
     private void Release()
     {
-        EndDrag();
+        cameraInput.EndDrag();
         if (view == null) return;
         textureId = 0;
         zoomDelta = 0;

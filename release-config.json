@@ -5,7 +5,8 @@
   "project": "Aetherloom/Aetherloom.csproj",
   "build": "Aetherloom/bin/Release",
   "required_dlls": [
-    "Aetherloom.dll"
+    "Aetherloom.dll",
+    "AetherglassUI.dll"
   ],
   "licenses": {
     "LICENSE": "LICENSE"

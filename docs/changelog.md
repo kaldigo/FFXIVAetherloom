@@ -1,1 +1,1 @@
-Preview a design's enabled hairstyle whenever the game lists it for your character, including designs saved on a different clan or face. The preview log now records the equipped, requested and selected hairstyle IDs.
+Introduces the three-pane wardrobe planner with a live character preview, gear and accessory rows, dye and appearance pickers, tags, and per-character assignment editing.
