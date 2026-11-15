@@ -356,8 +356,8 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         {
             var slot=Entry(key);
             var label=Labels.GetValueOrDefault(key.Split('/')[0],key);
-            if(key.StartsWith("MainHand") && Resolve(slot.Value<ulong>("ItemId")).Jobs is {Length:>0} jobs)label+=" · "+jobs;
-            if(key.StartsWith("OffHand"))label+=" · "+Resolve(Entry("MainHand"+key[7..]).Value<ulong>("ItemId")).Name;
+            if(key.StartsWith("MainHand") && Resolve(slot.Value<ulong>("ItemId")).Jobs is {Length:>0} jobs)label+=" \u00b7 "+jobs;
+            if(key.StartsWith("OffHand"))label+=" \u00b7 "+Resolve(Entry("MainHand"+key[7..]).Value<ulong>("ItemId")).Name;
             yield return new(key,label,Resolve(slot.Value<ulong>("ItemId")),slot.Value<byte>("Stain"),slot.Value<byte>("Stain2"),slot.Value<bool>("Apply"));
         }
     }
