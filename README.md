@@ -1,12 +1,16 @@
 # Aetherloom
 
-A standalone Dalamud companion for planning outfits with Glamourer. Open `/aetherloom`, select a saved Glamourer design and inspect the availability of each equipment item. **Refresh designs** reloads design edits. Item availability refreshes while the window is open or closed.
+Open `/aetherloom` to create, organize and apply outfits. Aetherloom stores its designs and folders in `wardrobe-plans.json`. Glamourer handles character state and supplies linked appearance bases.
+
+On the first wardrobe access after updating, enable the Glamourer fork so Aetherloom can read the existing library. It copies tagged designs, uses existing Aetherloom plans for outfit contents, and preserves wardrobe folders (including empty ones), tags, design IDs, favourites, assignments and linked bases. Tagged designs outside wardrobe folders appear at the root. Aetherloom saves a pre-migration copy of the existing file as `wardrobe-plans.json.pre-local.bak`. If a required design is unavailable, migration retries and Steward treats the source as unavailable until the complete library is saved.
+
+After migration, creation, imports, edits and deletions operate locally. Existing Glamourer designs and folders stay in Glamourer. Steward reads the local wardrobe, including alternate main hands, even when the editor is closed.
 
 Each character has their own inventory, Armoury Chest, equipped gear, glamour dresser and armoire snapshots. The plugin counts the actual item even if it has another glamour applied. It retains the last complete snapshot for each source across sessions and can seed dresser and armoire data from the earlier Glamourer fork. Open both storage windows once if a piece shows **Unconfirmed**. Event and Mog Station exemptions use the catalog in `Aetherloom/WardrobeExceptions.json`. An overlapping normal acquisition source takes precedence.
 
-Open `/aetherloom` and click **Preview current gear** to load a copy of your character as currently equipped. Drag with the left mouse button to rotate, drag with the right button to pan, and scroll over the preview to zoom. Stop and restart the preview to pick up gear changes. The preview pauses during zoning and party portraits, then resumes when the character and slot are available.
+Select a design to preview it on a copy of your character. Drag with the left mouse button to rotate, drag with the right button to pan, and scroll over the preview to zoom. The preview pauses during zoning and party portraits, then resumes when the character and slot are available.
 
-The editor, filtered copies for Glamourer automation, and transfer to native glamour plates are described in the [UI plan](docs/wardrobe-ui-plan.md). Plate transfers require actual dresser or armoire stock.
+Use the global Manual / Assignments switch to control Aetherloom outfit automation.
 
 ## Importing designs
 

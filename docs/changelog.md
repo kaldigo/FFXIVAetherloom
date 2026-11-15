@@ -1,1 +1,1 @@
-Keep the character's saved armoire contents at login. Refresh them when the armoire deposit or withdrawal window is open and its contents are loaded, including a final check on close.
+Aetherloom now owns its wardrobe. On first access it migrates outfit contents, folders, tags, favourites and assignments under their existing design IDs. New designs, imports and edits stay local. Linked Glamourer appearances still update from their originals, and Steward reads the same equipment references from the local wardrobe.

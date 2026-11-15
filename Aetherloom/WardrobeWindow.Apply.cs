@@ -22,8 +22,7 @@ internal sealed partial class WardrobeWindow
         if(objects.LocalPlayer is not {} player || !HasCharacter)return false;
         try
         {
-            var plan=id==Guid.Empty ? new JObject{["Equipment"]=new JObject(),["Customize"]=new JObject()} : Plans[id.ToString()] as JObject
-                ?? plugin.GetIpcSubscriber<Guid,JObject?>("Glamourer.GetDesignJObject").InvokeFunc(id);
+            var plan=id==Guid.Empty ? new JObject{["Equipment"]=new JObject(),["Customize"]=new JObject()} : Plans[id.ToString()] as JObject;
             if(plan?["Equipment"] is not JObject equipment || plan["Customize"] is not JObject)
             {
                 result="Could not read the wardrobe design.";

@@ -79,7 +79,7 @@ internal sealed partial class WardrobeWindow
             return true;
         }
         if(Environment.TickCount64>=nextRefresh)Refresh();
-        if(disconnected)return false;
+        if(!LocalReady)return false;
         var places=locations.Current(territory,map);
         assignment=WardrobeAssignment.Resolve(CharacterSettings,ownership.Character,job,territory,library.ContainsKey,places,locations.JobChain(job))
             ?? new(ownership.Character,job,territory,Guid.Empty);

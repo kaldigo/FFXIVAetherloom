@@ -1,4 +1,3 @@
-using Dalamud.Plugin.Ipc.Exceptions;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using Lumina.Excel.Sheets;
 using Newtonsoft.Json.Linq;
@@ -7,16 +6,12 @@ namespace Aetherloom;
 
 internal sealed partial class WardrobeWindow
 {
-    private readonly Dictionary<Guid,(int Mask,long RetryAfter)> wearableGear=[];
+    private readonly Dictionary<Guid,int> wearableGear=[];
     private readonly Dictionary<uint,int> itemMasks=[];
     private (byte Race,byte Sex)? visibleAppearance;
-    private int remoteReadsRemaining;
 
-    private void BeginWearableFrame()
-    {
-        visibleAppearance=null;
-        remoteReadsRemaining=4;
-    }
+
+    private void BeginWearableFrame()=>visibleAppearance=null;
 
     public unsafe bool Wearable(Guid id)
     {
@@ -26,21 +21,13 @@ internal sealed partial class WardrobeWindow
             var appearance=CharacterPreview.VisibleCustomize((Character*)player.Address);
             visibleAppearance=(appearance.Race,appearance.Sex);
         }
-        if(!wearableGear.TryGetValue(id,out var cached) || Environment.TickCount64>=cached.RetryAfter)
+        if(!wearableGear.TryGetValue(id,out var mask))
         {
-            var plan=Plans[id.ToString()] as JObject;
-            if(plan==null)
-            {
-                if(disconnected || remoteReadsRemaining<=0)return false;
-                remoteReadsRemaining--;
-                try { plan=plugin.GetIpcSubscriber<Guid,JObject?>("Glamourer.GetDesignJObject").InvokeFunc(id); }
-                catch(IpcError){plan=null;}
-            }
-            cached=plan==null ? (0,Environment.TickCount64+2000)
-                : (WardrobeWearability.DesignMask(plan,Gear.Concat(Accessories),ItemMask),long.MaxValue);
-            wearableGear[id]=cached;
+            if(Plans[id.ToString()] is not JObject plan)return false;
+            mask=WardrobeWearability.DesignMask(plan,Gear.Concat(Accessories),ItemMask);
+            wearableGear[id]=mask;
         }
-        return WardrobeWearability.Allows(cached.Mask,visibleAppearance.Value.Race,visibleAppearance.Value.Sex);
+        return WardrobeWearability.Allows(mask,visibleAppearance.Value.Race,visibleAppearance.Value.Sex);
     }
 
     private int ItemMask(ulong id)

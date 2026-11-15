@@ -38,13 +38,13 @@ internal sealed partial class WardrobeWindow
     }
     internal Dictionary<Guid,string> ListDesigns(bool onlyFavourites)
     {
-        Refresh();
-        return disconnected?[]:library.Values.Where(d=>!onlyFavourites || IsFavourite(d.Id)).ToDictionary(d=>d.Id,d=>d.Name);
+        if(!LocalReady)Refresh();
+        return library.Values.Where(d=>!onlyFavourites || IsFavourite(d.Id)).ToDictionary(d=>d.Id,d=>d.Name);
     }
     internal bool ApplyById(Guid id)
     {
         Refresh();
-        if(disconnected || !library.ContainsKey(id)){Message="The wardrobe design is unavailable.";return false;}
+        if(!LocalReady || !library.ContainsKey(id)){Message="The wardrobe design is unavailable.";return false;}
         bool applied=ApplyDesignToCharacter(id,out var result,true);
         if(applied)AssignmentMode=false;
         Message=result;

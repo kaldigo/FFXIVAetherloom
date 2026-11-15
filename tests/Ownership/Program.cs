@@ -182,3 +182,6 @@ foreach(var (key,index,mask) in WardrobeBase.Appearance)
 WardrobeBase.RestorePreviewAppearance(appearanceBytes,appliedAppearance);
 Demand(appearanceBytes.SequenceEqual(underlying),"Remove all tracked outfit appearance before applying the preview, including packed face, lipstick and paint bits");
 Console.WriteLine("Worn outfit appearance isolation checks passed.");
+
+MigrationChecks.Run();
+if(args is ["--rehearse",var configRoot])MigrationChecks.Rehearse(configRoot);

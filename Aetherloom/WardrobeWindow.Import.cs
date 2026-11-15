@@ -23,6 +23,7 @@ internal sealed partial class WardrobeWindow
         if (ImportBusy) return;
         try
         {
+            if(!LocalReady){ImportStatus="Waiting for the wardrobe migration.";return;}
             destination = fromPlates ? WardrobeLibrary.PathFor("","Glamaholic") : parent;
             folderIndex = plateIndex = created = skipped = 0;
             firstImported = Guid.Empty;
@@ -73,7 +74,7 @@ internal sealed partial class WardrobeWindow
             {
                 var plate = batch.Plates[plateIndex++];
                 ImportStatus = $"Importing {plateIndex} of {batch.Plates.Count} · {plate.Name}";
-                if (Plans[plate.Id.ToString()] is JObject previous && previous.Value<bool>("LibraryLinked"))
+                if (library.ContainsKey(plate.Id))
                 {
                     skipped++;
                     if(firstImported==Guid.Empty && library.ContainsKey(plate.Id)) firstImported=plate.Id;
@@ -84,14 +85,8 @@ internal sealed partial class WardrobeWindow
                 var gear = new JObject();
                 foreach(var (slot,item) in plate.Items)
                     gear[slot] = new JObject { ["ItemId"]=item.Id, ["Stain"]=item.First, ["Stain2"]=item.Second, ["Apply"]=true, ["ApplyStain"]=true };
-                // A deterministic source ID also lets a retry finish after a remote create and failed local save.
-                if (!library.ContainsKey(plate.Id) && !Call(()=>CreateRemote(plate.Id,plate.Name,destination+plate.Folder,tags)))
-                { StopImport(Message); return; }
-                var key = plate.Id.ToString();
-                Plans[key] = new JObject { ["Equipment"]=gear, ["Customize"]=new JObject(), ["Tags"]=new JArray(tags),
-                    ["LibraryLinked"]=true, ["Name"]=plate.Name };
-                Write();
-                if(Message.Length>0) { Plans.Remove(key); StopImport(Message); return; }
+                var plan=new JObject{["Equipment"]=gear,["Customize"]=new JObject(),["Tags"]=new JArray(tags)};
+                if(!AddPlan(plate.Id,plan,plate.Name,destination+plate.Folder)){StopImport(Message);return;}
                 created++;
                 if(firstImported==Guid.Empty) firstImported=plate.Id;
                 return;
@@ -109,8 +104,8 @@ internal sealed partial class WardrobeWindow
     {
         if(path.Length==0 || importFolders.Contains(path)) return true;
         var parent=WardrobeLibrary.Parent(path);
-        var name=path[(parent.Length==0?0:parent.Length+1)..];
-        if(!Call(()=>plugin.GetIpcSubscriber<string,string,string>(Api+"CreateFolder").InvokeFunc(parent,name)))
+        var name=WardrobeLibrary.Label(path);
+        if(!CreateFolder(parent,name))
         { StopImport(Message); return false; }
         importFolders.Add(path);
         return true;

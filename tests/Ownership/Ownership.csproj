@@ -7,6 +7,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../Aetherloom/OwnershipSnapshot.cs" />
+    <Compile Include="../../Aetherloom/WardrobeStore.cs" />
+    <Compile Include="../../Aetherloom/WardrobeLibrary.cs" />
+    <Compile Include="../../Aetherloom/WardrobeMetadata.cs" />
     <Compile Include="../../Aetherloom/WardrobeBase.cs" />
     <Compile Include="../../Aetherloom/WardrobeApplication.cs" />
     <Compile Include="../../Aetherloom/WardrobeWearability.cs" />
