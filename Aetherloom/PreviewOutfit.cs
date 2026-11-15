@@ -65,9 +65,11 @@ internal static class PreviewOutfit
 
         var bytes = model.CustomizeData.Data;
         var originalIdentity=(bytes[4],bytes[1],bytes[5]);
+        WardrobeBase.RestorePreviewAppearance(bytes,priorBase);
         foreach (var (key, index, mask) in WardrobeBase.Appearance)
         {
-            if(!WardrobeBase.TryValue(key,bytes[index],mask,look,priorBase,out var value))continue;
+            if(look[key] is not JObject field || !field.Value<bool>("Apply"))continue;
+            var value=field.Value<byte>("Value");
             if (key == "Hairstyle" && value != bytes[index] && !SupportsHairstyle(data, bytes[4], bytes[1], bytes[0], bytes[5], value))
             {
                 skipped.Add($"hairstyle {value} (unavailable for this character)");

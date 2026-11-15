@@ -23,15 +23,22 @@ internal static class WardrobeBase
     internal static readonly string[] OutfitFields=["Hairstyle","Highlights","HairColor","HighlightsColor","FacePaint","FacePaintReversed","FacePaintColor"];
 
     // Clan and gender changes can make Glamourer normalize other appearance fields.
-    internal static void RecordApplied(JObject previous,JObject next,JObject before,JObject after,JObject baseLook)
+    internal static void RecordApplied(JObject previous,JObject next,JObject before,JObject after,JObject? baseLook,JObject appliedLook)
     {
-        bool normalize=baseLook["Clan"]?.Value<bool>("Apply")==true || baseLook["Gender"]?.Value<bool>("Apply")==true;
+        bool normalize=baseLook?["Clan"]?.Value<bool>("Apply")==true || baseLook?["Gender"]?.Value<bool>("Apply")==true;
         foreach(var (key,_,_) in Appearance)
         {
             if(after[key]?["Value"] is not {} actual || before[key]?["Value"] is not {} visible)continue;
             if(next[key] is JObject tracked)
             {
-                tracked["Applied"]=actual.DeepClone();
+                if(appliedLook[key]?.Value<bool>("Apply")==true)
+                    tracked["Applied"]=actual.DeepClone();
+                else if(normalize && !JToken.DeepEquals(actual,visible))
+                {
+                    if(!JToken.DeepEquals(tracked["Applied"],visible))tracked["Before"]=visible.DeepClone();
+                    tracked["Applied"]=actual.DeepClone();
+                    tracked["Base"]=true;
+                }
                 continue;
             }
             var old=previous[key] as JObject;
@@ -45,9 +52,23 @@ internal static class WardrobeBase
     {
         if(look[key] is JObject field && field.Value<bool>("Apply"))
         {value=field.Value<byte>("Value");return true;}
-        if(previous?[key] is JObject old && old.Value<bool>("Base") && (current&mask)==old.Value<byte>("Applied"))
-        {value=old.Value<byte>("Before");return true;}
+        return TryOriginal(key,current,mask,previous,out value);
+    }
+
+    internal static bool TryOriginal(string key,byte current,byte mask,JObject? previous,out byte value)
+    {
+        if(previous?[key] is JObject field && field.Value<byte?>("Applied")== (current&mask)
+            && field.Value<byte?>("Before") is {} original)
+        {value=original;return true;}
         value=current;return false;
+    }
+
+    internal static void RestorePreviewAppearance(Span<byte> bytes,JObject? previous)
+    {
+        if(previous==null)return;
+        foreach(var (key,index,mask) in Appearance)
+            if(TryOriginal(key,bytes[index],mask,previous,out var original))
+                bytes[index]=(byte)((bytes[index]&~mask)|(original&mask));
     }
 
     // Hrothgar use the lip colour byte for their fur pattern. Preserve the linked base there.

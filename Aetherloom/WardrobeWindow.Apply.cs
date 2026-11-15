@@ -65,13 +65,13 @@ internal sealed partial class WardrobeWindow
                 result=$"Glamourer could not apply the design (code {response}).";
                 return false;
             }
-            if(baseLook!=null)
+            if(applyLook)
             {
                 try
                 {
                     var (code,applied)=plugin.GetIpcSubscriber<int,uint,(int,JObject?)>("Glamourer.GetState").InvokeFunc(player.ObjectIndex,0);
                     if(code==0 && applied?["Customize"] is JObject actual)
-                        WardrobeBase.RecordApplied(previous,next,currentLook,actual,baseLook);
+                        WardrobeBase.RecordApplied(previous,next,currentLook,actual,baseLook,(JObject)payload["Customize"]!);
                 }
                 catch(Dalamud.Plugin.Ipc.Exceptions.IpcError) { /* Keep the requested values if readback is unavailable. */ }
             }

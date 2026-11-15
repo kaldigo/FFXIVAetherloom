@@ -126,7 +126,7 @@ var based=new JObject{["Equipment"]=new JObject(),["Customize"]=merged};
 var trackedFields=WardrobeBase.Appearance.Select(f=>f.Key).ToArray();
 Demand(WardrobeApplication.PlanRestoration(new(),based,new(),origin,true,RealGear,trackedFields,out var tracked,out _,baseA),"Manual base applied");
 var actual=(JObject)merged.DeepClone();actual["Face"]=new JObject{["Value"]=2};
-WardrobeBase.RecordApplied(new(),tracked,origin,actual,baseA);
+WardrobeBase.RecordApplied(new(),tracked,origin,actual,baseA,merged);
 foreach(bool manual in new[]{true,false})
 {
     var clean=new JObject{["Equipment"]=new JObject(),["Customize"]=new JObject()};
@@ -150,3 +150,27 @@ Demand(ReferenceEquals(WardrobeBase.WithLipColor(baseMakeup,null,1,null),baseMak
 var fur=WardrobeBase.Compose(JObject.Parse("""{"Clan":{"Value":13,"Apply":true},"LipColor":{"Value":3,"Apply":true}}"""),new());
 Demand(ReferenceEquals(WardrobeBase.WithLipColor(fur,lips,1,null),fur),"A linked Hrothgar appearance keeps its fur pattern");
 Console.WriteLine("Lip shade composition checks passed.");
+
+var wornHair=JObject.Parse("""{"Hairstyle":{"Before":3,"Applied":11,"Base":false},"HairColor":{"Before":8,"Applied":4},"Highlights":{"Before":0,"Applied":128},"HighlightsColor":{"Before":22,"Applied":16}}""");
+foreach(var (key,_,mask) in WardrobeBase.Appearance.Where(f=>wornHair.ContainsKey(f.Key)))
+{
+    byte shown=wornHair[key]!.Value<byte>("Applied");
+    Demand(WardrobeBase.TryValue(key,shown,mask,new(),wornHair,out var neutral) && neutral==wornHair[key]!.Value<byte>("Before"),"Ignore the worn outfit's "+key+" in another preview");
+}
+var styled=JObject.Parse("""{"Hairstyle":{"Value":7,"Apply":true}}""");
+foreach(var target in new[]{WardrobeBase.Compose(styled,new()),WardrobeBase.Compose(null,styled)})
+    Demand(WardrobeBase.TryValue("Hairstyle",11,255,target,wornHair,out var shown) && shown==7,"The previewed base or outfit sets its own hair");
+Demand(!WardrobeBase.TryValue("Hairstyle",9,255,new(),wornHair,out var changedHair) && changedHair==9,"Keep a later external hairstyle change");
+var appearanceBytes=new byte[26];
+var appliedAppearance=new JObject();
+var underlying=new byte[26];
+foreach(var (key,index,mask) in WardrobeBase.Appearance)
+{
+    byte before=(byte)(0x55&mask), after=(byte)(0xaa&mask);
+    appearanceBytes[index]|=after;
+    underlying[index]|=before;
+    appliedAppearance[key]=new JObject{["Before"]=before,["Applied"]=after,["Base"]=false};
+}
+WardrobeBase.RestorePreviewAppearance(appearanceBytes,appliedAppearance);
+Demand(appearanceBytes.SequenceEqual(underlying),"Remove all tracked outfit appearance before applying the preview, including packed face, lipstick and paint bits");
+Console.WriteLine("Worn outfit appearance isolation checks passed.");

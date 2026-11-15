@@ -1,1 +1,1 @@
-Choose a lip shade in Appearance to apply lipstick with a wardrobe design. The picker uses the character creation dark and light palettes and respects the preview race, including linked appearances. Hrothgar fur patterns remain controlled by their appearance.
+Wardrobe previews clear the worn Aetherloom outfit’s tracked character appearance before applying the previewed design and its linked base. This includes hair, highlights, face paint, lip colour and linked character customization. Later external appearance edits are preserved.
