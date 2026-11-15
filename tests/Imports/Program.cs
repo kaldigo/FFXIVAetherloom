@@ -40,3 +40,7 @@ Check(!WardrobeMetadata.Matches(metadata,filters,()=>["Bard"]),"weapon filter us
 filters["Style"].Clear();filters["Style"].Add("Vintage");
 Check(!WardrobeMetadata.Matches(metadata,filters,()=>["Dancer"]),"all active categories must match");
 Console.WriteLine("Wardrobe metadata checks passed.");
+
+var jobRows=new (string,string,string?,string?)[]{("BRD","bard","barde","BRD"),("brd","Bard",null,"BAR"),("","unused",null,null),("","unused",null,null)};
+var aliases=jobRows.ToJobAliases();
+Check(aliases.Count==1 && aliases["brd"].SequenceEqual(["bard","barde","BRD","BAR"]),"weapon job search merges duplicate abbreviations and skips unnamed rows");

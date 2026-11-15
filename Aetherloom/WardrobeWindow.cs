@@ -313,7 +313,11 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
                 ids.AddRange(extras.Properties().Select(p=>p.Value.Value<ulong?>("ItemId")??0UL));
             var localized=data.GetExcelSheet<ClassJob>();
             jobNames??=data.GetExcelSheet<ClassJob>(Dalamud.Game.ClientLanguage.English).Where(j=>j.RowId>0)
-                .ToDictionary(j=>j.Abbreviation.ExtractText(),j=>new[]{j.Name.ExtractText(),localized.GetRow(j.RowId).Name.ExtractText(),localized.GetRow(j.RowId).Abbreviation.ExtractText()});
+                .Select(j=>
+                {
+                    var local=localized.GetRowOrDefault(j.RowId);
+                    return (j.Abbreviation.ExtractText(),j.Name.ExtractText(),local?.Name.ExtractText(),local?.Abbreviation.ExtractText());
+                }).ToJobAliases();
             terms=ids.SelectMany(item=>Jobs(Resolve(item).Jobs)).Distinct()
                 .SelectMany(abbr=>(jobNames.GetValueOrDefault(abbr)??[]).Prepend(abbr)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             weaponJobTerms[id]=terms;

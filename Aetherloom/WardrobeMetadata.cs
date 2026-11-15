@@ -53,6 +53,13 @@ internal static class WardrobeMetadata
     internal static bool ContainsText(string value,string query)=>value.Contains(query,StringComparison.OrdinalIgnoreCase)
         || (JobAliases.TryGetValue(value,out var abbr) && abbr.Contains(query,StringComparison.OrdinalIgnoreCase));
 
+    internal static Dictionary<string,string[]> ToJobAliases(this IEnumerable<(string Code,string Name,string? LocalName,string? LocalCode)> rows)
+        => rows.Where(row=>!string.IsNullOrWhiteSpace(row.Code))
+            .GroupBy(row=>row.Code,StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group=>group.Key,group=>group.SelectMany(row=>new[]{row.Name,row.LocalName,row.LocalCode})
+                .OfType<string>().Where(alias=>!string.IsNullOrWhiteSpace(alias))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),StringComparer.OrdinalIgnoreCase);
+
     internal static bool Matches(IEnumerable<WardrobeTag> tags,Dictionary<string,HashSet<string>> filters,Func<IEnumerable<string>> weapons)
     {
         foreach(var (group,choices) in filters)

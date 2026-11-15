@@ -64,61 +64,72 @@ internal sealed partial class WardrobeLayout
         if(IconAction("Wardrobe filters",FilterCount))ImGui.OpenPopup("filters");
         AutoOpen("filters","filters");
         var anchor=ImGui.GetItemRectMax()+new Vector2(-12,8)*S;
-        bool open=WorkspaceControls.BeginPicker("filters",330,362,anchor);
-        if(open)
+        if(!WorkspaceControls.BeginPicker("filters",330,362,anchor))return MatchingDesigns();
+        try
         {
             WorkspaceControls.PickerHeading("Wardrobe filters");
             foreach(var group in WardrobeMetadata.Filters)
             {
                 if(group=="Classification")ImGui.Separator();
                 ImGui.PushID(group);
-                ImGui.AlignTextToFramePadding();ImGui.TextUnformatted(group);
-                ImGui.SameLine(112*S);
-                var chosen=filters[group];
-                var summary="Any";
-                if(chosen.Count>0)
-                {
-                    var first=chosen.First();
-                    float available=ImGui.GetContentRegionAvail().X;
-                    ImGui.PushStyleColor(ImGuiCol.Button,new Vector4(.13f,.35f,.34f,1));
-                    if(ImGui.Button(first+"  ×",new Vector2(Math.Min(available*.68f,ImGui.CalcTextSize(first+"  ×").X+16*S),0)))
-                        chosen.Remove(first);
-                    ImGui.PopStyleColor();
-                    if(ImGui.IsItemHovered())ImGui.SetTooltip("Remove "+first);
-                    ImGui.SameLine();
-                    summary=chosen.Count>1?"+"+(chosen.Count-1):"";
-                }
-                ImGui.SetNextItemWidth(-1);
-                if(ImGui.BeginCombo("##choices",summary))
-                {
-                    SearchOptions();
-                    if(ImGui.Selectable("Any",chosen.Count==0))chosen.Clear();
-                    foreach(var option in Options(group).Where(x=>WardrobeMetadata.ContainsText(x,optionSearch)))
-                        if(ImGui.Selectable(option,chosen.Contains(option),ImGuiSelectableFlags.DontClosePopups))
-                            {if(!chosen.Add(option))chosen.Remove(option);}
-                    ImGui.EndCombo();
-                }
-                ImGui.PopID();
+                try { DrawFilter(group); }
+                finally { ImGui.PopID(); }
             }
             ImGui.Separator();
             if(ImGui.SmallButton("Clear filters"))foreach(var chosen in filters.Values)chosen.Clear();
+            var result=MatchingDesigns();
+            var count=$"{result.Length} matching design{(result.Length==1?"":"s")}";
+            ImGui.SameLine();ImGui.SetCursorPosX(ImGui.GetCursorPosX()+Math.Max(0,ImGui.GetContentRegionAvail().X-ImGui.CalcTextSize(count).X));
+            ImGui.TextDisabled(count);
+            return result;
         }
+        finally { WorkspaceControls.EndPicker(); }
+    }
+
+    private void DrawFilter(string group)
+    {
+        ImGui.AlignTextToFramePadding();ImGui.TextUnformatted(group);
+        ImGui.SameLine(112*S);
+        var chosen=filters[group];
+        var summary="Any";
+        if(chosen.Count>0)
+        {
+            var first=chosen.First();
+            float available=ImGui.GetContentRegionAvail().X;
+            ImGui.PushStyleColor(ImGuiCol.Button,new Vector4(.13f,.35f,.34f,1));
+            if(ImGui.Button(first+"  ×",new Vector2(Math.Min(available*.68f,ImGui.CalcTextSize(first+"  ×").X+16*S),0)))
+                chosen.Remove(first);
+            ImGui.PopStyleColor();
+            if(ImGui.IsItemHovered())ImGui.SetTooltip("Remove "+first);
+            ImGui.SameLine();
+            summary=chosen.Count>1?"+"+(chosen.Count-1):"";
+        }
+        ImGui.SetNextItemWidth(-1);
+        if(ImGui.BeginCombo("##choices",summary))
+        {
+            try
+            {
+                SearchOptions();
+                if(ImGui.Selectable("Any",chosen.Count==0))chosen.Clear();
+                // Selection changes the same set used to build the options.
+                foreach(var option in Options(group).Where(x=>WardrobeMetadata.ContainsText(x,optionSearch)).ToArray())
+                    if(ImGui.Selectable(option,chosen.Contains(option),ImGuiSelectableFlags.DontClosePopups))
+                        {if(!chosen.Add(option))chosen.Remove(option);}
+            }
+            finally { ImGui.EndCombo(); }
+        }
+    }
+
+    private LibraryDesign[] MatchingDesigns()
+    {
         var words=filter.Split(' ',StringSplitOptions.RemoveEmptyEntries);
         bool filtered=FilterCount>0;
-        var result=wardrobe.Designs.Where(d=>words.All(word=>d.Name.Contains(word,StringComparison.OrdinalIgnoreCase)
+        return wardrobe.Designs.Where(d=>words.All(word=>d.Name.Contains(word,StringComparison.OrdinalIgnoreCase)
             || d.Metadata.Any(t=>WardrobeMetadata.ContainsText(t.Value,word))
             || WardrobeMetadata.ContainsText(WardrobeMetadata.Single(WardrobeMetadata.Intended,d.Metadata),word)
             || WardrobeMetadata.ContainsText(WardrobeMetadata.Single(WardrobeMetadata.Gender,d.Metadata),word)
             || wardrobe.JobTerms(d.Id).Any(term=>term.Contains(word,StringComparison.OrdinalIgnoreCase)))
             && (!filtered || WardrobeMetadata.Matches(d.Metadata,filters,()=>wardrobe.WeaponTerms(d.Id)))).ToArray();
-        if(open)
-        {
-            var count=$"{result.Length} matching design{(result.Length==1?"":"s")}";
-            ImGui.SameLine();ImGui.SetCursorPosX(ImGui.GetCursorPosX()+Math.Max(0,ImGui.GetContentRegionAvail().X-ImGui.CalcTextSize(count).X));
-            ImGui.TextDisabled(count);
-            WorkspaceControls.EndPicker();
-        }
-        return result;
     }
 
     private IEnumerable<string> Options(string group)
