@@ -5,6 +5,21 @@ namespace Aetherloom;
 
 internal static class WardrobeStore
 {
+    internal static Dictionary<Guid,string> ListSavedDesigns(string glamourerDirectory)
+    {
+        var result=new Dictionary<Guid,string>();
+        try
+        {
+            foreach(var file in Directory.EnumerateFiles(Path.Combine(glamourerDirectory,"designs"),"*.json"))
+            {
+                var name=Path.GetFileNameWithoutExtension(file);
+                if(Guid.TryParseExact(name,"D",out var id))result[id]=name;
+            }
+        }
+        catch(DirectoryNotFoundException){ /* Fresh profile with no Glamourer designs. */ }
+        return result;
+    }
+
     internal static LibraryDesign Describe(Guid id,string name,JObject source)
     {
         if(!Guid.TryParse(source.Value<string>("Identifier"),out var identifier) || identifier!=id)

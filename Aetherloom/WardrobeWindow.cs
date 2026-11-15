@@ -78,12 +78,19 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         preview.WindowOrigin=ImGui.GetWindowPos();preview.WindowSize=ImGui.GetWindowSize();
         layout.Draw(()=>IsOpen=false);
     }
-    private Dictionary<Guid,string> GlamourerDesigns()
-        =>plugin.GetIpcSubscriber<Dictionary<Guid,string>>("Glamourer.GetDesignList").InvokeFunc()
-            ??throw new InvalidDataException("Glamourer returned no design list.");
+    private string GlamourerDirectory=>Path.Combine(Directory.GetParent(plugin.GetPluginConfigDirectory())!.FullName,"Glamourer");
+    private readonly Dictionary<Guid,(DateTime Stamp,JObject Design)> savedDesigns=[];
 
     private JObject? GlamourerDesign(Guid id)
-        =>plugin.GetIpcSubscriber<Guid,JObject?>("Glamourer.GetDesignJObject").InvokeFunc(id);
+    {
+        var info=new FileInfo(Path.Combine(GlamourerDirectory,"designs",id+".json"));
+        if(!info.Exists){savedDesigns.Remove(id);return null;}
+        if(savedDesigns.TryGetValue(id,out var cached) && cached.Stamp==info.LastWriteTimeUtc)return cached.Design;
+        var source=JObject.Parse(File.ReadAllText(info.FullName));
+        var entry=WardrobeStore.Describe(id,info.Name,source);
+        if(WardrobeStore.IsAppearanceBase(entry))savedDesigns[id]=(info.LastWriteTimeUtc,source);else savedDesigns.Remove(id);
+        return source;
+    }
 
     private void Refresh()
     {
@@ -108,8 +115,8 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
 
     private void MigrateFromGlamourer()
     {
-        // The public IPC lists designs. Empty folders live in Glamourer's organization file.
-        var organization=Path.Combine(plugin.ConfigFile.DirectoryName!,"Glamourer","design_filesystem","organization.json");
+        // Glamourer can be disabled or still loading during a first-run Glamaholic import.
+        var organization=Path.Combine(GlamourerDirectory,"design_filesystem","organization.json");
         string[] folders=[];
         if(File.Exists(organization))
         {
@@ -117,7 +124,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
             if(index["Folders"] is not JObject paths)throw new InvalidDataException("Could not read Glamourer's folder list.");
             folders=paths.Properties().Select(p=>p.Name).ToArray();
         }
-        var candidate=WardrobeStore.MigrateFromDesigns(Document(),GlamourerDesigns(),folders,GlamourerDesign);
+        var candidate=WardrobeStore.MigrateFromDesigns(Document(),WardrobeStore.ListSavedDesigns(GlamourerDirectory),folders,GlamourerDesign);
         if(File.Exists(file) && !File.Exists(file+".pre-local.bak"))File.Copy(file,file+".pre-local.bak");
         Commit(candidate);
     }

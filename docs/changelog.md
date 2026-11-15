@@ -1,1 +1,1 @@
-Use upstream Glamourer for linked appearance bases and first-time wardrobe migration. The base picker discovers tagged designs through public IPC, and existing links resolve by design ID for preview, manual apply and assignments. Empty wardrobe folders are recovered from Glamourer’s saved organization during migration.
+Fix first-run Glamaholic import and linked-base discovery when Glamourer design-list IPC is unavailable. Aetherloom reads saved Glamourer designs and their tags directly from the active Dalamud profile.

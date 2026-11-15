@@ -32,14 +32,18 @@ internal sealed partial class WardrobeWindow
             if(opening)
             {
                 baseScan.Clear();
-                var listed=GlamourerDesigns();
+                var listed=WardrobeStore.ListSavedDesigns(GlamourerDirectory);
                 foreach(var id in bases.Keys.Except(listed.Keys).ToArray())bases.Remove(id);
                 foreach(var entry in listed)baseScan.Enqueue(entry);
             }
             for(int i=0;i<4 && baseScan.TryDequeue(out var entry);i++)
-                ReadBaseEntry(entry.Key,entry.Value,out _);
+            {
+                try { ReadBaseEntry(entry.Key,entry.Value,out _); }
+                catch(Exception ex) when(ex is IpcError or System.IO.IOException or System.IO.InvalidDataException or UnauthorizedAccessException or Newtonsoft.Json.JsonException)
+                {bases.Remove(entry.Key);Message=$"Could not read Glamourer design {entry.Value}: {ex.Message}";}
+            }
         }
-        catch(Exception ex) when(ex is IpcError or System.IO.InvalidDataException)
+        catch(Exception ex) when(ex is System.IO.IOException or UnauthorizedAccessException)
         {baseScan.Clear();bases.Clear();Message="Could not read Glamourer bases: "+ex.Message;}
         return baseScan.Count!=0;
     }
@@ -68,7 +72,7 @@ internal sealed partial class WardrobeWindow
                 return false;
             }
         }
-        catch(System.IO.InvalidDataException ex){error=ex.Message;return false;}
+        catch(Exception ex) when(ex is IpcError or System.IO.IOException or System.IO.InvalidDataException or UnauthorizedAccessException or Newtonsoft.Json.JsonException){error=ex.Message;return false;}
         if(source?["Customize"] is not JObject appearance || appearance.Value<uint>("ModelId")!=0)
         {error="The linked base must be a player-character design.";return false;}
         look=appearance;return true;

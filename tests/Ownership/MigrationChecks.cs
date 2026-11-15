@@ -36,6 +36,9 @@ internal static class MigrationChecks
         WardrobeStore.ChangeFolder(result,"[AL] A","","New");
         WardrobeStore.ChangeFolder(result,"[AL] New","",null);
         Check((string?)plans[stored.ToString()]!["Folder"]=="[AL] B" && result["Folders"]!.Values<string>().Contains("[AL] Empty"),"folder promotion");
+        var fresh=WardrobeStore.MigrateFromDesigns(new JObject(),WardrobeStore.ListSavedDesigns(
+            Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString())),[],_=>throw new Exception("Unexpected design lookup."));
+        Check(WardrobeStore.IsLocal(fresh) && fresh["Plans"] is JObject {Count:0},"fresh profile can import without Glamourer");
         var upstream=new JObject{["Identifier"]=baseId.ToString(),["Name"]="Renamed",["Tags"]=new JArray("Aetherloom-Base"),["FileSystemFolder"]="Shared"};
         var entry=WardrobeStore.Describe(baseId,"Original",upstream);
         Check(entry.Id==baseId && entry.Name=="Renamed" && entry.Folder=="Shared" && WardrobeStore.IsAppearanceBase(entry),"upstream base discovery");
@@ -55,7 +58,7 @@ internal static class MigrationChecks
         var entries=sources.Select(p=>new LibraryDesign(p.Key,p.Value.Value<string>("Name")!,p.Value["Tags"]?.ToObject<string[]>()??[],
             p.Value.Value<string>("FileSystemFolder")??"")).ToArray();
         var folders=((JObject)JObject.Parse(File.ReadAllText(Path.Combine(folder,"design_filesystem","organization.json")))["Folders"]!).Properties().Select(p=>p.Name).ToArray();
-        var result=WardrobeStore.MigrateFromDesigns(original,entries.ToDictionary(e=>e.Id,e=>e.Name),folders,id=>sources[id]);
+        var result=WardrobeStore.MigrateFromDesigns(original,WardrobeStore.ListSavedDesigns(folder),folders,id=>sources[id]);
         Check(JToken.DeepEquals(result,WardrobeStore.Migrate(original,entries,folders,id=>sources[id])),"upstream migration differs from fork migration");
         var plans=(JObject)result["Plans"]!;
         var expected=new HashSet<uint>();

@@ -353,12 +353,12 @@ internal sealed partial class WardrobeLayout
         var linked=wardrobe.LinkedBase;
         var choicesForBase=wardrobe.Bases.OrderBy(d=>d.Name,StringComparer.OrdinalIgnoreCase).ThenBy(d=>d.Id).ToArray();
         var caption=linked==null?"None":choicesForBase.FirstOrDefault(d=>d.Id==linked)?.Name??"Unavailable base";
-        if(ImGui.Button(caption+"###base-design",new Vector2(-1,0))){baseSearch="";ImGui.OpenPopup("bases");}
+        if(ImGui.Button(caption+"###base-design",new Vector2(-1,0))){baseSearch="";wardrobe.ScanBases(true);ImGui.OpenPopup("bases");}
         if(WorkspaceControls.BeginPicker("bases",320,300))
         {
             try
             {
-                bool scanning=wardrobe.ScanBases(ImGui.IsWindowAppearing());
+                bool scanning=wardrobe.ScanBases(false);
                 WorkspaceControls.PickerHeading("Appearance base");
                 ImGui.SetNextItemWidth(-1);ImGui.InputTextWithHint("##find-base","Search designs",ref baseSearch,100);
                 if(ImGui.Selectable("None",linked==null))wardrobe.SetBase(null);
