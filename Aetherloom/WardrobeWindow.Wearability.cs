@@ -32,7 +32,7 @@ internal sealed partial class WardrobeWindow
 
     private int ItemMask(ulong id)
     {
-        if(IsEmptyItem(id))return WardrobeWearability.Everyone;
+        if(WardrobeWeapons.IsEmptyItem(id))return WardrobeWearability.Everyone;
         if(id>uint.MaxValue)return 0;
         uint item=(uint)id;
         if(itemMasks.TryGetValue(item,out var mask))return mask;

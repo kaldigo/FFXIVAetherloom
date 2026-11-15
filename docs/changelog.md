@@ -1,1 +1,1 @@
-Fix first-run Glamaholic import and linked-base discovery when Glamourer design-list IPC is unavailable. Aetherloom reads saved Glamourer designs and their tags directly from the active Dalamud profile.
+Pair shields and secondary tools with individual main hands. Choose the preview weapon using the eye on its gear row. Design previews start with empty gear slots and retain the camera when switching weapons. Manual and assignment application select the pair for the current job.

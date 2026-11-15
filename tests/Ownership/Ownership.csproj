@@ -12,6 +12,7 @@
     <Compile Include="../../Aetherloom/WardrobeMetadata.cs" />
     <Compile Include="../../Aetherloom/WardrobeBase.cs" />
     <Compile Include="../../Aetherloom/WardrobeApplication.cs" />
+    <Compile Include="../../Aetherloom/WardrobeWeapons.cs" />
     <Compile Include="../../Aetherloom/WardrobeWearability.cs" />
     <Compile Include="../../Aetherloom/WardrobeAssignment.cs" />
     <Reference Include="Newtonsoft.Json">

@@ -122,6 +122,8 @@ internal static class WardrobeStore
         {
             var equipment=p.Value["Equipment"] as JObject??throw new InvalidDataException("Missing design equipment.");
             foreach(var slot in slots) Add(equipment[slot]);
+            if(p.Value["PairedOffHands"] is JObject pairs)
+                foreach(var pair in pairs.Properties())Add(pair.Value);
             if(p.Value["AdditionalMainHands"] is JObject hands)
                 foreach(var hand in hands.Properties()) Add(hand.Value);
         }

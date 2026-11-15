@@ -85,6 +85,24 @@ if(WardrobeAssignment.Resolve(bindings,123,12,100,plans.ContainsKey)!=null
     throw new Exception("Unassigned or deleted design fallback failed.");
 Console.WriteLine("Job and zone assignment checks passed.");
 
+{
+    var plan=JObject.Parse("""{"Equipment":{"MainHand":{"ItemId":100},"OffHand":{"ItemId":300,"Stain2":12,"Apply":true}},"AdditionalMainHands":{"MainHand/paladin":{"ItemId":200}}}""");
+    WardrobeWeapons.Upgrade(plan,(main,off)=>main==200 && off==300);
+    var hands=WardrobeWeapons.Hands(plan).ToArray();
+    var shield=WardrobeWeapons.OffHand(plan,hands[1].Key,hands[1].Slot,2,false)!;
+    if(shield.Value<uint>("ItemId")!=300 || shield.Value<byte>("Stain2")!=12 || plan["Equipment"]!["OffHand"]!=null)
+        throw new Exception("Legacy shield was not retained with its compatible alternate.");
+    if(WardrobeWeapons.OffHand(plan,hands[0].Key,hands[0].Slot,3,false)!=null ||
+        WardrobeWeapons.OffHand(plan,hands[0].Key,hands[0].Slot,84,true)!.Value<uint>("ItemId")!=100)
+        throw new Exception("Independent and built-in off hands were confused.");
+    if(!WardrobeStore.ItemIds(new JObject{["design"]=plan},new[]{"MainHand","OffHand"},_=>true).SequenceEqual(new uint[]{100,200,300}))
+        throw new Exception("Steward lost a paired item.");
+    ((JObject)plan["PairedOffHands"]!).Remove(hands[1].Key);
+    var emptyShield=WardrobeWeapons.OffHand(plan,hands[1].Key,hands[1].Slot,2,false)!;
+    if(!emptyShield.Value<bool>("Apply") || emptyShield.Value<uint>("ItemId")!=WardrobeWeapons.EmptyShield ||
+        WardrobeWeapons.OffCategory(8)!=11 || WardrobeWeapons.OffCategory(9)!=0 || WardrobeWeapons.OffCategory(12)!=13)
+        throw new Exception("Empty shield or off-hand eligibility failed.");
+}
 var wearablePlan=JObject.Parse("""{"Equipment":{"Body":{"ItemId":1,"Apply":true},"Ears":{"ItemId":2,"Apply":false,"ApplyStain":true}},"AdditionalMainHands":{"MainHand/2":{"ItemId":3,"Apply":true}},"Tags":["gender:Male"],"BypassOwnership":true}""");
 int ItemMask(ulong id)=>id switch {1=>WardrobeWearability.Everyone,2=>0x101,3=>0x280,_=>0};
 int Mask()=>WardrobeWearability.DesignMask(wearablePlan,["Body","Ears"],ItemMask);

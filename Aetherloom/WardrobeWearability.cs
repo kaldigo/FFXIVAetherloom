@@ -16,6 +16,8 @@ internal static class WardrobeWearability
         var slots=keys.Select(key=>equipment[key]).OfType<JObject>();
         if(plan["AdditionalMainHands"] is JObject hands)
             slots=slots.Concat(hands.Properties().Select(p=>p.Value).OfType<JObject>());
+        if(plan["PairedOffHands"] is JObject pairs)
+            slots=slots.Concat(pairs.Properties().Select(p=>p.Value).OfType<JObject>());
         int mask=Everyone;
         foreach(var slot in slots)
             if(slot.Value<bool>("Apply") && slot.Value<ulong?>("ItemId") is >0 and var id)

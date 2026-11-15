@@ -36,7 +36,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     private readonly Dictionary<uint,WardrobeItem> known=[];
     private readonly Dictionary<(byte,byte,byte,string),WardrobeStyle[]> styles=[];
     private readonly WardrobeDye[] dyes;
-    private string previewHand="MainHand";
+    private string? previewHand;
     private JObject? projection;
     private static readonly string[] Gear=["MainHand","OffHand","Head","Body","Hands","Legs","Feet"];
     private static readonly string[] Accessories=["Ears","Neck","Wrists","RFinger","LFinger"];
@@ -146,15 +146,16 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
             Select(Designs.OrderBy(d=>d.Name).Select(d=>d.Id).FirstOrDefault());
         else if(!JToken.DeepEquals(Plans[Selected.ToString()],design))
         {
-            design=(JObject)Plans[Selected.ToString()]!.DeepClone();
+            design=EditablePlan((JObject)Plans[Selected.ToString()]!);
             projection=null;
         }
     }
 
     public void Select(Guid id)
     {
-        Selected=id;previewHand="MainHand";projection=null;
-        design=Plans[id.ToString()] is JObject local?(JObject)local.DeepClone():new();
+        Selected=id;projection=null;
+        design=Plans[id.ToString()] is JObject local?EditablePlan(local):new();
+        previewHand=null;
     }
     private void Save()
     {
@@ -258,12 +259,18 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     private JObject Extras=>(JObject)(design["AdditionalMainHands"]??=new JObject());
     private JObject Entry(string key)
     {
+        if(key.StartsWith("OffHand"))
+        {
+            var pairs=(JObject)(design["PairedOffHands"]??=new JObject());
+            string mainKey="MainHand"+key[7..];
+            return (JObject)(pairs[mainKey]??=WardrobeWeapons.Empty());
+        }
         var parent=key.Contains('/')?Extras:Equipment;
         return (JObject)(parent[key]??=new JObject());
     }
     private WardrobeItem Resolve(ulong id)
     {
-        if(id==0)return new(0,"Empty",0,0);
+        if(WardrobeWeapons.IsEmptyItem(id))return new(0,"Empty",0,0);
         if(id>uint.MaxValue||!data.GetExcelSheet<Item>().TryGetRow((uint)id,out var row))return new(0,"Custom model",0,0);
         if(!known.TryGetValue((uint)id,out var item)) known[(uint)id]=item=FromRow(row);
         return item;
@@ -320,7 +327,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     private WardrobeItem FromRow(Item item)
     {
         var jobs="";
-        if(item.EquipSlotCategory.Value.MainHand>0)
+        if(item.EquipSlotCategory.Value.MainHand>0 || item.EquipSlotCategory.Value.OffHand>0)
         {
             var category=item.ClassJobCategory.Value;
             if(!eligibleJobs.TryGetValue(category.RowId,out jobs))
@@ -335,12 +342,45 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     }
     public IEnumerable<WardrobeSlot> Slots(bool accessories)
     {
-        IEnumerable<string> keys=accessories?Accessories:Gear.Take(1).Concat(Extras.Properties().Select(x=>x.Name)).Concat(Gear.Skip(1));
-        foreach(var key in keys)
+        IEnumerable<string> Keys()
+        {
+            foreach(var hand in Extras.Properties().Select(p=>p.Name).Prepend("MainHand"))
+            {
+                yield return hand;
+                if(WardrobeWeapons.OffCategory(Category(Entry(hand).Value<ulong>("ItemId")))!=0)
+                    yield return "OffHand"+hand[8..];
+            }
+            foreach(var key in Gear.Skip(2))yield return key;
+        }
+        foreach(var key in accessories?(IEnumerable<string>)Accessories:Keys())
         {
             var slot=Entry(key);
-            yield return new(key,Labels.GetValueOrDefault(key.Split('/')[0],key),Resolve(slot.Value<ulong>("ItemId")),slot.Value<byte>("Stain"),slot.Value<byte>("Stain2"),slot.Value<bool>("Apply"));
+            var label=Labels.GetValueOrDefault(key.Split('/')[0],key);
+            if(key.StartsWith("MainHand") && Resolve(slot.Value<ulong>("ItemId")).Jobs is {Length:>0} jobs)label+=" · "+jobs;
+            if(key.StartsWith("OffHand"))label+=" · "+Resolve(Entry("MainHand"+key[7..]).Value<ulong>("ItemId")).Name;
+            yield return new(key,label,Resolve(slot.Value<ulong>("ItemId")),slot.Value<byte>("Stain"),slot.Value<byte>("Stain2"),slot.Value<bool>("Apply"));
         }
+    }
+
+    private uint Category(ulong id)=>id<=uint.MaxValue && data.GetExcelSheet<Item>().TryGetRow((uint)id,out var row)?row.ItemUICategory.RowId:0;
+    private bool CompatibleOff(ulong main,ulong off)
+    {
+        var category=WardrobeWeapons.OffCategory(Category(main));
+        return category!=0 && (WardrobeWeapons.IsEmptyItem(off) || (category==Category(off) && Jobs(Resolve(main).Jobs).Intersect(Jobs(Resolve(off).Jobs)).Any()));
+    }
+
+    private JObject EditablePlan(JObject plan)
+    {
+        var copy=(JObject)plan.DeepClone();
+        WardrobeWeapons.Upgrade(copy,CompatibleOff);
+        return copy;
+    }
+
+    private JObject? PairedOff(JObject plan,string key,JObject main)
+    {
+        var id=main.Value<ulong>("ItemId");
+        if(id>uint.MaxValue || !data.GetExcelSheet<Item>().TryGetRow((uint)id,out var item))return null;
+        return WardrobeWeapons.OffHand(plan,key,main,item.ItemUICategory.RowId,item.ModelSub!=0);
     }
     public object OwnershipSnapshot=>ownership.Snapshot;
     public IEnumerable<WardrobeItem> Catalog(string key)
@@ -349,6 +389,11 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         if(!catalogs.TryGetValue(slot,out var items))
             catalogs[slot]=items=data.GetExcelSheet<Item>().Where(i=>i.EquipSlotCategory.RowId!=0 && WardrobeImportData.Fits(i.EquipSlotCategory.Value,slot))
                 .Select(FromRow).Where(i=>i.Name.Length>0).OrderBy(i=>i.Name).ToList();
+        if(slot=="OffHand")
+        {
+            var main=Entry("MainHand"+key[7..]).Value<ulong>("ItemId");
+            return items.Where(i=>CompatibleOff(main,i.Id));
+        }
         if(slot!="MainHand")return items;
         var used=Slots(false).Where(x=>x.Key!=key&&x.Key.StartsWith("MainHand")).SelectMany(x=>Jobs(x.Item.Jobs)).ToHashSet();
         return items.Where(i=>!Jobs(i.Jobs).Any(used.Contains));
@@ -360,7 +405,11 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     {
         var slot=Entry(key);slot["ItemId"]=id;slot["Apply"]=true;
         if(id==0){slot["Stain"]=0;slot["Stain2"]=0;slot["ApplyStain"]=true;}
-        if(key.StartsWith("MainHand"))previewHand=key;
+        if(key.StartsWith("MainHand"))
+        {
+            if(design["PairedOffHands"] is JObject pairs && pairs[key] is JObject off && !CompatibleOff(id,off.Value<ulong>("ItemId")))pairs.Remove(key);
+            previewHand=key;
+        }
         Save();
     }
     public void SetDye(string key,int channel,byte dye){var slot=Entry(key);slot[channel==0?"Stain":"Stain2"]=dye;slot["ApplyStain"]=true;Save();}
@@ -368,7 +417,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     public void MainHand(string? remove)
     {
         if(remove==null)Extras["MainHand/"+Guid.NewGuid()]=new JObject();
-        else {Extras.Remove(remove);if(previewHand==remove)previewHand="MainHand";}
+        else {(design["PairedOffHands"] as JObject)?.Remove(remove);Extras.Remove(remove);if(previewHand==remove)previewHand=null;}
         Save();
     }
     private CustomizeData? editorAppearance;
@@ -473,12 +522,19 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         Save();
     }
     public void ResetCamera()=>preview.ResetCamera();
-    public void WeaponSelector()
+    public string PreviewHand
     {
-        var hands=Slots(false).Where(x=>x.Key.StartsWith("MainHand")&&x.Item.Id!=0).ToArray();
-        if(hands.Length>1 && ImGui.BeginCombo("Preview weapon",hands.FirstOrDefault(x=>x.Key==previewHand)?.Item.Name??"Select weapon"))
-        {foreach(var hand in hands)if(ImGui.Selectable(hand.Item.Name+"###"+hand.Key,hand.Key==previewHand)){previewHand=hand.Key;projection=null;}ImGui.EndCombo();}
+        get
+        {
+            var hands=WardrobeWeapons.Hands(design).Where(h=>h.Slot.Value<ulong>("ItemId")!=0);
+            if(previewHand!=null && hands.Any(h=>h.Key==previewHand))return previewHand;
+            var job=objects.LocalPlayer is {} actor?data.GetExcelSheet<ClassJob>(Dalamud.Game.ClientLanguage.English)
+                .GetRowOrDefault(actor.ClassJob.RowId)?.Abbreviation.ExtractText():null;
+            var matching=hands.FirstOrDefault(h=>Jobs(Resolve(h.Slot.Value<ulong>("ItemId")).Jobs).Contains(job)).Key;
+            return previewHand=matching??hands.FirstOrDefault().Key??"MainHand";
+        }
     }
+    public void PreviewWeapon(string key){previewHand=key;projection=null;}
     private void PrepareProjection()
     {
         if(previewCharacter!=ownership.Character){previewCharacter=ownership.Character;projection=null;}
@@ -494,7 +550,12 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
                 {
                     projection["Customize"]=WardrobeBase.Compose(baseLook,Look);
                     if(HasCharacter && CharacterSettings["AppliedFields"] is JObject ledger)projection["PreviousBase"]=ledger.DeepClone();
-                    if(previewHand!="MainHand")((JObject)projection["Equipment"]!)["MainHand"]=Entry(previewHand).DeepClone();
+                    var gear=(JObject)projection["Equipment"]!;
+                    var key=PreviewHand;
+                    var main=Entry(key);
+                    gear["MainHand"]=main.DeepClone();
+                    gear.Remove("OffHand");
+                    if(PairedOff(design,key,main) is {} off)gear["OffHand"]=off;
                 }
                 else projectionError=error;
             }

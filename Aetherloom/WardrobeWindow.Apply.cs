@@ -23,7 +23,7 @@ internal sealed partial class WardrobeWindow
         try
         {
             var plan=id==Guid.Empty ? new JObject{["Equipment"]=new JObject(),["Customize"]=new JObject()} : Plans[id.ToString()] as JObject;
-            if(plan?["Equipment"] is not JObject equipment || plan["Customize"] is not JObject)
+            if(plan?["Equipment"] is not JObject || plan["Customize"] is not JObject)
             {
                 result="Could not read the wardrobe design.";
                 return false;
@@ -40,11 +40,12 @@ internal sealed partial class WardrobeWindow
                 return false;
             }
             var job=data.GetExcelSheet<ClassJob>(Dalamud.Game.ClientLanguage.English).GetRow(player.ClassJob.RowId).Abbreviation.ExtractText();
-            var hands=plan["AdditionalMainHands"] is JObject extras ? extras.Properties().Select(p=>p.Value) : [];
-            var main=hands.Prepend(equipment["MainHand"]).OfType<JObject>().FirstOrDefault(slot=>
-                Jobs(Resolve(slot.Value<ulong>("ItemId")).Jobs).Contains(job));
             if(!ReadBase(plan,out var baseLook,out result))return false;
-            var composed=(JObject)plan.DeepClone();
+            var composed=EditablePlan(plan);
+            var (key,main)=WardrobeWeapons.Hands(composed).FirstOrDefault(h=>Jobs(Resolve(h.Slot.Value<ulong>("ItemId")).Jobs).Contains(job));
+            var gear=(JObject)composed["Equipment"]!;
+            gear.Remove("OffHand");
+            if(main!=null && PairedOff(composed,key,main) is {} off)gear["OffHand"]=off;
             var previous=CharacterSettings["AppliedFields"] as JObject??new JObject();
             var look=WardrobeBase.Compose(baseLook,(JObject)plan["Customize"]!);
             composed["Customize"]=WardrobeBase.WithLipColor(look,plan["LipColorOverride"] as JObject,
@@ -85,12 +86,9 @@ internal sealed partial class WardrobeWindow
         }
     }
 
-    private static bool IsEmptyItem(ulong id)=>id==0 || id is <= uint.MaxValue-128 and >= uint.MaxValue-150
-            || id is <= uint.MaxValue-384 and >= uint.MaxValue-639;
-
     private bool CanApplyItem(ulong id)
     {
-        if(IsEmptyItem(id))return true;
+        if(WardrobeWeapons.IsEmptyItem(id))return true;
         return id<=uint.MaxValue && ownership.Availability((uint)id) is not ("Missing" or "Unconfirmed");
     }
 }

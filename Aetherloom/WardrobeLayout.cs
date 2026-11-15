@@ -76,7 +76,8 @@ internal interface IWardrobe
     bool? DisplayOption(string key);
     void ToggleDisplay(string key);
     void ResetCamera();
-    void WeaponSelector();
+    string PreviewHand=>"MainHand";
+    void PreviewWeapon(string key){}
     void DrawPreview();
 }
 
@@ -507,17 +508,34 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
 
     private void DrawEquipment(bool accessories)
     {
-        if(!accessories)wardrobe.WeaponSelector();
         var rows=wardrobe.Slots(accessories).ToArray();
+        bool multipleHands=rows.Count(r=>r.Key.StartsWith("MainHand") && r.Item.Id!=0)>1;
         for(int i=0;i<rows.Length;i++)
         {
             var slot=rows[i]; ImGui.PushID(slot.Key);
             var source=slot.Item.Id==0?"":wardrobe.Availability(slot.Item.Id);
             var width=ImGui.GetContentRegionAvail().X;
-            var bodyWidth=width-(30*slot.Item.Channels+34)*S-ImGui.GetStyle().ItemSpacing.X*(slot.Item.Channels+1);
+            bool eye=multipleHands && slot.Item.Id!=0 && slot.Key.StartsWith("MainHand");
+            var bodyWidth=width-(eye?30*S+ImGui.GetStyle().ItemSpacing.X:0)-(30*slot.Item.Channels+34)*S-ImGui.GetStyle().ItemSpacing.X*(slot.Item.Channels+1);
             if(WorkspaceControls.Tile("item",slot.Item.Name,slot.Label+(source.Length>0?"  ·  "+source:""),wardrobe.Icon(slot.Item.Icon),false,source=="Missing",bodyWidth))
             {search="";itemFilter="All";ImGui.OpenPopup("items");}
             AutoOpen(slot.Key,"items"); GearPicker(slot);
+            if(eye)
+            {
+                ImGui.SameLine();
+                bool active=wardrobe.PreviewHand==slot.Key;
+                if(ImGui.InvisibleButton("Preview this weapon",new Vector2(30*S,30*S)))wardrobe.PreviewWeapon(slot.Key);
+                if(ImGui.IsItemHovered())ImGui.SetTooltip("Preview "+slot.Item.Name);
+                var center=(ImGui.GetItemRectMin()+ImGui.GetItemRectMax())*.5f;
+                var draw=ImGui.GetWindowDrawList();
+                uint color=active?0xffccded0u:0xff948e84u;
+                draw.AddRectFilled(ImGui.GetItemRectMin(),ImGui.GetItemRectMax(),active?0xff525d2eu:0xff302b25u,4*S);
+                draw.AddRect(ImGui.GetItemRectMin(),ImGui.GetItemRectMax(),active?0xffb6b754u:0xff534e46u,4*S);
+                var left=center-new Vector2(9*S,0);var right=center+new Vector2(9*S,0);
+                draw.AddBezierCubic(left,left+new Vector2(5,-8)*S,right+new Vector2(-5,-8)*S,right,color,1.5f*S);
+                draw.AddBezierCubic(left,left+new Vector2(5,8)*S,right+new Vector2(-5,8)*S,right,color,1.5f*S);
+                draw.AddCircleFilled(center,2.7f*S,color);
+            }
             for(int channel=0;channel<slot.Item.Channels;channel++)
             {
                 var id=channel==0?slot.First:slot.Second;
@@ -532,8 +550,11 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
             bool apply=slot.Apply;
             if(ImGui.Checkbox("##apply",ref apply))wardrobe.SetApply(slot.Key,apply);
             if(ImGui.IsItemHovered()) ImGui.SetTooltip("Apply this slot");
-            if(slot.Key.StartsWith("MainHand/") && ImGui.SmallButton("Remove weapon"))wardrobe.MainHand(slot.Key);
-            if(slot.Key.StartsWith("MainHand") && (i+1==rows.Length||!rows[i+1].Key.StartsWith("MainHand")))
+            bool followedByOff=i+1<rows.Length && rows[i+1].Key.StartsWith("OffHand");
+            if((slot.Key.StartsWith("MainHand/") && !followedByOff || slot.Key.StartsWith("OffHand/")) && ImGui.SmallButton("Remove weapon"))
+                wardrobe.MainHand("MainHand"+slot.Key[slot.Key.IndexOf('/')..]);
+            if((slot.Key.StartsWith("MainHand") || slot.Key.StartsWith("OffHand")) &&
+                (i+1==rows.Length || !(rows[i+1].Key.StartsWith("MainHand") || rows[i+1].Key.StartsWith("OffHand"))))
                 if(ImGui.SmallButton("+  Main hand"))wardrobe.MainHand(null);
             ImGui.PopID();
         }

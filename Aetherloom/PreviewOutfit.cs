@@ -11,6 +11,12 @@ internal static class PreviewOutfit
     private static readonly string[] Armor = ["Head", "Body", "Hands", "Legs", "Feet", "Ears", "Neck", "Wrists", "RFinger", "LFinger"];
     public static string Apply(ref CharaViewModelData model, JObject gear, JObject look, IDataManager data,JObject? priorBase=null)
     {
+        model.EquipmentModelIds.Clear();
+        model.WeaponModelIds.Clear();
+        model.GlassesIds.Clear();
+        model.HeadgearHidden=false;
+        model.WeaponHidden=false;
+        model.VisorClosed=false;
         var skipped = new List<string>();
         var items = data.GetExcelSheet<Item>();
         for (var i = 0; i < Armor.Length + 2; i++)
@@ -31,7 +37,15 @@ internal static class PreviewOutfit
                 else if ((id >> 48) == 1)
                     replacement = weapon ? id & 0xFFFFFFFFFFUL : (ushort)id | (((id >> 32) & 255) << 16);
                 else if (id <= uint.MaxValue && items.TryGetRow((uint)id, out var item))
-                    replacement = offhand && item.EquipSlotCategory.Value.MainHand > 0 ? item.ModelSub : item.ModelMain;
+                {
+                    replacement=item.ModelMain;
+                    if(offhand && item.EquipSlotCategory.Value.MainHand>0)
+                    {
+                        // Older fist weapons store the gauntlets in ModelSub. The left fist is the adjacent weapon set.
+                        replacement=item.ItemUICategory.RowId==1 && item.ModelSub is >0 and <0x100000000
+                            ? item.ModelMain+50 : item.ModelSub;
+                    }
+                }
                 else
                 {
                     skipped.Add(name);
