@@ -7,6 +7,13 @@ internal sealed record OwnershipSnapshot(
     HashSet<uint>? Armoury = null,
     HashSet<uint>? Equipped = null)
 {
+    internal OwnershipSnapshot RefreshArmoire(bool windowReady, Func<HashSet<uint>?> readLoadedContents)
+    {
+        if (!windowReady || readLoadedContents() is not {} contents || Armoire?.SetEquals(contents) == true)
+            return this;
+        return this with { Armoire = contents };
+    }
+
     internal string Availability(uint itemId, bool exempt, bool currentCharacter)
     {
         if (currentCharacter)

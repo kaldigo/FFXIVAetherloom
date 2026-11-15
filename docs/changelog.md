@@ -1,1 +1,1 @@
-Browse all matching gear and accessories in one continuously scrollable list. The larger picker keeps search and ownership filters in view and loads icons for the visible rows.
+Keep the character's saved armoire contents at login. Refresh them when the armoire deposit or withdrawal window is open and its contents are loaded, including a final check on close.

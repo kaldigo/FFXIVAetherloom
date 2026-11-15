@@ -1,5 +1,8 @@
 using System.IO;
 using System.Text.Json;
+using Dalamud.Game.Addon.Lifecycle;
+using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game;
@@ -16,6 +19,8 @@ public sealed class WardrobeOwnership : IDisposable
     private readonly IFramework _framework;
     private readonly IPlayerState _player;
     private readonly IClientState _client;
+    private readonly IGameGui _gui;
+    private readonly IAddonLifecycle _addons;
     private readonly string _directory;
     private readonly (uint Row, uint Item)[] _cabinet;
     private readonly Dictionary<uint, uint[]> _outfits;
@@ -25,11 +30,13 @@ public sealed class WardrobeOwnership : IDisposable
     private long _nextScan;
     private bool _dirty;
 
-    public WardrobeOwnership(IFramework framework, IPlayerState player, IClientState client, IDalamudPluginInterface pi, IDataManager data, IPluginLog log)
+    public WardrobeOwnership(IFramework framework, IPlayerState player, IClientState client, IDalamudPluginInterface pi, IDataManager data, IPluginLog log, IGameGui gui, IAddonLifecycle addons)
     {
         _log = log;
         _player = player;
         _client = client;
+        _gui = gui;
+        _addons = addons;
         _framework = framework;
         _directory = pi.GetPluginConfigDirectory();
         _cabinet = data.GetExcelSheet<Cabinet>().Where(c => c.Item.RowId != 0).Select(c => (c.RowId, c.Item.RowId)).ToArray();
@@ -40,6 +47,7 @@ public sealed class WardrobeOwnership : IDisposable
         });
         using var catalog = typeof(WardrobeOwnership).Assembly.GetManifestResourceStream("Aetherloom.WardrobeExceptions.json")!;
         _exceptions = JsonSerializer.Deserialize<HashSet<uint>>(catalog)!;
+        addons.RegisterListener(AddonEvent.PreClose, ["Cabinet", "CabinetWithdraw"], OnArmoireClosing);
         framework.Update += Update;
     }
 
@@ -157,20 +165,42 @@ public sealed class WardrobeOwnership : IDisposable
             }
         }
 
-        var ui = UIState.Instance();
-        if (ui != null && ui->Cabinet.IsCabinetLoaded())
-        {
-            var contents = new HashSet<uint>();
-            foreach (var (row, item) in _cabinet)
-                if (ui->Cabinet.IsItemInCabinet(row))
-                    contents.Add(item);
-            if (_snapshot.Armoire?.SetEquals(contents) != true)
-            {
-                _snapshot = _snapshot with { Armoire = contents };
-                _dirty = true;
-            }
-        }
+        RefreshArmoire(ArmoireWindowReady("Cabinet") || ArmoireWindowReady("CabinetWithdraw"));
         Save();
+    }
+
+    private unsafe bool ArmoireWindowReady(string name)
+    {
+        var addon = _gui.GetAddonByName(name);
+        return !addon.IsNull && addon.IsVisible && ((AtkUnitBase*)addon.Address)->IsReady;
+    }
+
+    private void OnArmoireClosing(AddonEvent type, AddonArgs args)
+    {
+        if (Character == 0) return;
+        RefreshArmoire(ArmoireWindowReady(args.AddonName));
+        Save();
+    }
+
+    private void RefreshArmoire(bool windowReady)
+    {
+        var next = _snapshot.RefreshArmoire(windowReady, ReadLoadedArmoire);
+        if (ReferenceEquals(next, _snapshot)) return;
+        _log.Debug($"Updated armoire cache from the open armoire ({next.Armoire!.Count} items).");
+        _snapshot = next;
+        _dirty = true;
+    }
+
+    private unsafe HashSet<uint>? ReadLoadedArmoire()
+    {
+        var ui = UIState.Instance();
+        if (ui == null || ui->Cabinet.State != FFXIVClientStructs.FFXIV.Client.Game.UI.Cabinet.CabinetState.Loaded)
+            return null;
+        var contents = new HashSet<uint>();
+        foreach (var (row, item) in _cabinet)
+            if (ui->Cabinet.IsItemInCabinet(row))
+                contents.Add(item);
+        return contents;
     }
 
     private void Save()
@@ -191,6 +221,7 @@ public sealed class WardrobeOwnership : IDisposable
 
     public void Dispose()
     {
+        _addons.UnregisterListener(OnArmoireClosing);
         _framework.Update -= Update;
         Save();
     }

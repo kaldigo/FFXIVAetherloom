@@ -25,6 +25,14 @@ Check(JsonSerializer.Deserialize<OwnershipSnapshot>(stored)!, "Armoury Chest");
 var legacy = JsonSerializer.Deserialize<OwnershipSnapshot>("""{"Dresser":[400],"Armoire":[]}""")!;
 Check(legacy, "Glamour Dresser");
 Check(legacy with { Dresser = [] }, "Unconfirmed");
+// A cold login loads yesterday's armoire and refreshes carried containers before the cabinet opens.
+var persistedArmoire=JsonSerializer.Serialize(empty with { Armoire=[boots] });
+var login=JsonSerializer.Deserialize<OwnershipSnapshot>(persistedArmoire)! with { Bags=[99],Armoury=[],Equipped=[] };
+Check(JsonSerializer.Deserialize<OwnershipSnapshot>(JsonSerializer.Serialize(login))!, "Armoire");
+Check(login.RefreshArmoire(false,()=>throw new Exception("Read closed armoire at login")), "Armoire");
+Check(login.RefreshArmoire(true,()=>null), "Armoire");
+Check(login.RefreshArmoire(true,()=>[]), "Missing");
+Check((login with { Armoire=null }).RefreshArmoire(false,()=>[]), "Unconfirmed");
 Console.WriteLine("Ownership checks passed.");
 
 var planned=JObject.Parse("""{"Body":{"ItemId":50,"Stain":3,"Stain2":7,"Apply":true,"ApplyStain":true},"Ears":{"ItemId":400,"Apply":true},"Feet":{"ItemId":50,"Apply":false},"Hat":{"Show":false,"Apply":true}}""");
