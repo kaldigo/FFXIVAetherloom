@@ -40,12 +40,16 @@ internal interface IWardrobe
     bool HasCharacter {get;}
     ISet<byte> FavoriteDyes {get;}
     void ToggleFavorite(byte id);
+    bool DisplayOption(string key);
+    void ToggleDisplay(string key);
+    void ResetCamera();
+    void PreviewOptions();
     void DrawPreview();
 }
 
 internal sealed class WardrobeLayout(IWardrobe wardrobe)
 {
-    private readonly WindowShell shell=new(){ShowIconRail=false,ShowPageHeading=false};
+    private readonly WindowShell shell=new(){ShowIconRail=false,ShowPageHeading=false,EdgeToEdgeBody=true};
     private string filter="",newName="",newTag="",search="";
     internal string Tab="Gear";
     internal string? OpenPicker;
@@ -75,7 +79,37 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         } finally { ImGui.PopStyleColor(6); }
     }
     private void Body()=>WorkspaceControls.Split("wardrobe-panes",
-        new("designs",21,Sidebar),new("editor",43,Editor),new("character",36,wardrobe.DrawPreview));
+        new("designs",205,Sidebar,true),new("editor",1,Editor),new("character",345,PreviewPanel,true));
+
+    private static readonly (string Key,string Label,Vector2[][] Paths)[] PreviewActions=[
+        ("Weapon","Display sheathed arms",[[new(-.23f,-.25f),new(.16f,.14f),new(.09f,.2f),new(-.23f,-.25f)],[new(.02f,.18f),new(.2f,0)],[new(.12f,.12f),new(.24f,.24f)]]),
+        ("Hat","Display headgear",[[new(-.26f,.10f),new(-.19f,-.10f),new(0,-.21f),new(.17f,-.13f),new(.24f,.10f),new(-.26f,.10f)],[new(-.25f,.17f),new(.27f,.17f)]]),
+        ("Visor","Manually adjust visor",[[new(-.23f,-.13f),new(.23f,-.13f),new(.17f,.09f),new(0,.19f),new(-.17f,.09f),new(-.23f,-.13f)],[new(-.14f,-.01f),new(.14f,-.01f)]]),
+        ("VieraEars","Show Viera ears",[[new(-.05f,.21f),new(-.22f,-.23f),new(-.13f,-.28f),new(0,.03f),new(.13f,-.28f),new(.22f,-.23f),new(.05f,.21f)]]),
+        ("Draw","Sheath / draw weapon",[[new(-.24f,.20f),new(.22f,-.22f),new(.13f,.02f),new(-.12f,.18f)],[new(-.23f,.01f),new(-.03f,.21f)]]),
+        ("Reset","Reset camera",[[new(-.22f,-.02f),new(-.10f,-.16f),new(.12f,-.16f),new(.22f,-.01f),new(.15f,.14f),new(-.03f,.18f)],[new(-.23f,-.17f),new(-.23f,-.01f),new(-.06f,-.01f)]])];
+    private void PreviewPanel()
+    {
+        float height=Math.Max(1,ImGui.GetContentRegionAvail().Y-40*S);
+        if(ImGui.BeginChild("character-image",new Vector2(-1,height),false,ImGuiWindowFlags.NoScrollbar|ImGuiWindowFlags.NoScrollWithMouse))
+            wardrobe.DrawPreview();
+        ImGui.EndChild();
+        if(ImGui.BeginPopupContextItem("preview-options",ImGuiPopupFlags.MouseButtonMiddle)){wardrobe.PreviewOptions();ImGui.EndPopup();}
+        float right=ImGui.GetCursorPosX()+ImGui.GetContentRegionAvail().X;
+        foreach(var (key,label,paths) in PreviewActions)
+        {
+            if(key!="Weapon")ImGui.SameLine();
+            if(key=="Draw")ImGui.SetCursorPosX(right-60*S-ImGui.GetStyle().ItemSpacing.X);
+            bool previewOnly=key is "Draw" or "Reset";
+            ImGui.BeginDisabled(!previewOnly && wardrobe.Selected==Guid.Empty);
+            bool clicked=WorkspaceControls.RoundAction(label,key!="Reset" && wardrobe.DisplayOption(key),(dl,c,side,color)=>{
+                foreach(var path in paths)
+                    for(int i=1;i<path.Length;i++)dl.AddLine(c+side*path[i-1],c+side*path[i],color,1.8f*S);
+            });
+            ImGui.EndDisabled();
+            if(clicked){if(key=="Reset")wardrobe.ResetCamera();else wardrobe.ToggleDisplay(key);}
+        }
+    }
 
     private static void Heading(string text)
     {
@@ -123,6 +157,8 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
             if(newTag.Trim().Length>0 && ImGui.Button("Add")){wardrobe.Tag(newTag.Trim(),true);newTag="";ImGui.CloseCurrentPopup();}
             ImGui.EndPopup();
         }
+        ImGui.SameLine();if(ImGui.SmallButton("Preview options"))ImGui.OpenPopup("preview-menu");
+        if(ImGui.BeginPopup("preview-menu")){wardrobe.PreviewOptions();ImGui.EndPopup();}
         ImGui.Spacing();
         if(ImGui.BeginTabBar("wardrobe-tabs"))
         {
@@ -219,25 +255,30 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
     }
     private void DyePicker(WardrobeSlot slot,int channel,string popup)
     {
-        if(!WorkspaceControls.BeginPicker(popup,320,280))return;
-        Heading($"{slot.Label} · Dye {channel+1}");
+        if(!WorkspaceControls.BeginPicker(popup,332,335))return;
+        Heading($"{slot.Label}  \u00b7  Dye channel {channel+1}");
+        var chosen=channel==0?slot.First:slot.Second;
+        var current=wardrobe.Dyes.FirstOrDefault(x=>x.Id==chosen);
+        ImGui.TextDisabled("Selected"); ImGui.SameLine();ImGui.TextUnformatted(current?.Name??"No dye");
+        ImGui.Spacing();ImGui.Separator();ImGui.Spacing();
         for(int i=0;i<Families.Length;i++)
         {if(i!=0)ImGui.SameLine();if(WorkspaceControls.Swatch("family"+i,Families[i],new[]{"Neutral","Red","Brown","Yellow","Green","Blue","Purple","Special"}[i],i==family,25,true))family=i;}
-        var chosen=channel==0?slot.First:slot.Second;
+        ImGui.Spacing();
         void Palette(IEnumerable<WardrobeDye> dyes,string prefix)
         {
             int i=0;foreach(var dye in dyes)
             {
                 if(i++%8!=0)ImGui.SameLine();
-                if(WorkspaceControls.Swatch(prefix+dye.Id,dye.Color,dye.Name,dye.Id==chosen,22))
+                if(WorkspaceControls.Swatch(prefix+dye.Id,dye.Color,dye.Name,dye.Id==chosen,29))
                 {wardrobe.SetDye(slot.Key,channel,dye.Id);ImGui.CloseCurrentPopup();}
                 if(ImGui.IsItemClicked(ImGuiMouseButton.Right))wardrobe.ToggleFavorite(dye.Id);
             }
         }
         Palette(wardrobe.Dyes.Where(d=>d.Family==family),"color");
-        ImGui.TextUnformatted(wardrobe.Dyes.FirstOrDefault(x=>x.Id==chosen)?.Name??"No dye");
+        ImGui.Spacing();
         ImGui.Separator();ImGui.TextDisabled("Favorites");Palette(wardrobe.Dyes.Where(d=>wardrobe.FavoriteDyes.Contains(d.Id)).ToArray(),"favorite");
-        if(ImGui.SmallButton("Remove dye")){wardrobe.SetDye(slot.Key,channel,0);ImGui.CloseCurrentPopup();}
+        if(wardrobe.FavoriteDyes.Count==0)ImGui.TextDisabled("Right-click a dye to save a favourite.");
+        ImGui.Spacing();if(ImGui.SmallButton("Remove dye")){wardrobe.SetDye(slot.Key,channel,0);ImGui.CloseCurrentPopup();}
         ImGui.EndPopup();
     }
     private void DrawAssignments()

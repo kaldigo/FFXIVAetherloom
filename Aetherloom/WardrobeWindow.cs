@@ -47,7 +47,7 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     {
         this.plugin=plugin;this.data=data;this.ownership=ownership;this.preview=preview;this.textures=textures;this.objects=objects;
         Size=new Vector2(1180,730);SizeCondition=ImGuiCond.FirstUseEver;
-        SizeConstraints=new WindowSizeConstraints{MinimumSize=new(840,500),MaximumSize=new(float.MaxValue)};
+        SizeConstraints=new WindowSizeConstraints{MinimumSize=new(1000,500),MaximumSize=new(float.MaxValue)};
         file=Path.Combine(plugin.GetPluginConfigDirectory(),"wardrobe-plans.json");
         if(File.Exists(file))saved=JObject.Parse(File.ReadAllText(file));
         Plans=(JObject?)saved["Plans"]??new();assignments=(JObject?)saved["Assignments"]??new();
@@ -60,7 +60,11 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     public override void PostDraw()=>WindowShell.PopHostStyle();
     public override void OnOpen(){ Refresh(); preview.Start(Selected!=Guid.Empty); }
     public override void OnClose()=>preview.Close();
-    public override void Draw()=>layout.Draw(()=>IsOpen=false);
+    public override void Draw()
+    {
+        preview.WindowOrigin=ImGui.GetWindowPos();preview.WindowSize=ImGui.GetWindowSize();
+        layout.Draw(()=>IsOpen=false);
+    }
     public void Refresh()
     {
         Message="";
@@ -241,11 +245,29 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     }
     public ISet<byte> FavoriteDyes{get;}=new HashSet<byte>();
     public void ToggleFavorite(byte id){if(!FavoriteDyes.Remove(id))FavoriteDyes.Add(id);saved["FavoriteDyes"]=new JArray(FavoriteDyes);Write();}
-    public void DrawPreview()
+    public bool DisplayOption(string key)
     {
+        if(key=="Draw")return preview.WeaponDrawn;
+        var entry=Equipment[key];
+        return entry?.Value<bool>("Apply")==true ? entry.Value<bool>(key=="Visor"?"IsToggled":"Show") : preview.EquippedOption(key);
+    }
+    public void ToggleDisplay(string key)
+    {
+        if(key=="Draw"){preview.WeaponDrawn=!preview.WeaponDrawn;return;}
+        var value=!DisplayOption(key);
+        Equipment[key]=new JObject{["Apply"]=true,[key=="Visor"?"IsToggled":"Show"]=value};
+        Save();
+    }
+    public void ResetCamera()=>preview.ResetCamera();
+    public void PreviewOptions()
+    {
+        preview.Options(Selected!=Guid.Empty);
         var hands=Slots(false).Where(x=>x.Key.StartsWith("MainHand")&&x.Item.Id!=0).ToArray();
         if(hands.Length>1 && ImGui.BeginCombo("Weapon",hands.FirstOrDefault(x=>x.Key==previewHand)?.Item.Name??"Select weapon"))
         {foreach(var hand in hands)if(ImGui.Selectable(hand.Item.Name+"###"+hand.Key,hand.Key==previewHand)){previewHand=hand.Key;projection=null;}ImGui.EndCombo();}
+    }
+    public void DrawPreview()
+    {
         if(projection==null && Selected!=Guid.Empty)
         {
             projection=(JObject)design.DeepClone();

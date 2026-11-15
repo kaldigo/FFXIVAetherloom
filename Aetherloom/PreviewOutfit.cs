@@ -65,6 +65,8 @@ internal static class PreviewOutfit
         if (gear["Weapon"] is JObject weaponState && weaponState.Value<bool>("Apply")) model.WeaponHidden = !weaponState.Value<bool>("Show");
         if (gear["Visor"] is JObject visor && visor.Value<bool>("Apply")) model.VisorClosed = visor.Value<bool>("IsToggled");
 
+        if (gear["VieraEars"] is JObject ears && ears.Value<bool>("Apply")) model.VieraEarsHidden = !ears.Value<bool>("Show");
+
         var bytes = model.CustomizeData.Data;
         foreach (var (key, index, mask) in Appearance)
         {

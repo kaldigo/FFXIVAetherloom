@@ -1,1 +1,1 @@
-Introduces the three-pane wardrobe planner with a live character preview, gear and accessory rows, dye and appearance pickers, tags, and per-character assignment editing.
+Full-height character preview with fixed-width side panes and a colour-matched renderer backdrop. Added design controls for sheathed arms, headgear, visor and Viera ears, preview-only draw and camera reset, and clearer dye selection.

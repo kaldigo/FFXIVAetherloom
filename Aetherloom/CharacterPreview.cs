@@ -34,9 +34,20 @@ internal sealed unsafe class CharacterPreview : IDisposable
     private OffscreenRenderingManager* backgroundOwner;
     private Texture* previousBackground;
     private Texture* installedBackground;
-    private enum Background { GameDefault, Black, White }
-    private static readonly string[] BackgroundNames = ["Game default (grey)", "Black", "White"];
-    private int background;
+    private (uint TL,uint TR,uint BL,uint BR)? pendingColors, installedColors;
+    private long nextTextureAttempt;
+    public Vector2 WindowOrigin, WindowSize;
+    public bool WeaponDrawn { get; set; }
+    private bool? appliedPose;
+    private bool resetCamera;
+    public void ResetCamera() => resetCamera=true;
+    public bool EquippedOption(string key)
+    {
+        if(objects.LocalPlayer is not {} actor)return key!="Visor";
+        var draw=&((Character*)actor.Address)->DrawData;
+        return key switch {"Hat"=>!draw->IsHatHidden,"Weapon"=>!draw->IsWeaponHidden,
+            "VieraEars"=>!draw->VieraEarsHidden,"Visor"=>draw->IsVisorToggled,_=>false};
+    }
     private readonly PreviewCameraInput cameraInput = new();
     private bool requested;
     private nint player, textureId;
@@ -67,12 +78,9 @@ internal sealed unsafe class CharacterPreview : IDisposable
         status = "";
     }
 
-    public void Draw(JObject? design = null)
+    public void Options(bool hasDesign)
     {
-        lastDraw = Environment.TickCount64;
-        selectedDesign = design;
-        if (design == null && previewDesign && requested) Close();
-        if (design != null && (!requested || !previewDesign))
+        if (hasDesign && (!requested || !previewDesign))
         {
             if (ImGui.Button("Preview selected design"))
             {
@@ -80,7 +88,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
                 requested = true;
                 status = "";
             }
-            ImGui.SameLine();
+
         }
         if ((!requested || previewDesign) && ImGui.Button("Preview current gear"))
         {
@@ -88,28 +96,34 @@ internal sealed unsafe class CharacterPreview : IDisposable
             requested = true;
             status = "";
         }
-        if (!requested)
+        if(requested && ImGui.Button("Stop preview"))Close();
+    }
+
+    public void Draw(JObject? design)
+    {
+        lastDraw=Environment.TickCount64;
+        selectedDesign=design;
+        if (!requested || textureId==0 || !ReferenceEquals(loadedDesign,previewDesign?design:null))
         {
-            if (status.Length != 0) ImGui.TextWrapped(status);
+            ImGui.TextWrapped(status.Length>0?status:requested?"Loading character preview...":"Preview stopped.");
             return;
         }
-
-        if (ImGui.Button("Stop preview")) { Close(); return; }
-        if (textureId == 0 || !ReferenceEquals(loadedDesign, previewDesign ? design : null))
-        {
-            ImGui.TextUnformatted(status.Length == 0 ? "Loading character preview..." : status);
-            return;
-        }
-
-        WorkspaceControls.Viewport("##character-camera",new Picture(new ImTextureID((ulong)textureId)),aspect,()=>
+        WorkspaceControls.FillViewport("##character-camera",new Picture(new ImTextureID((ulong)textureId)),aspect,(tl,br)=>
         {
             var io=ImGui.GetIO();
             if(ImGui.IsItemHovered()) { ImGuiP.SetItemUsingMouseWheel(); zoomDelta-=io.MouseWheel; }
             cameraInput.Read(io.FontGlobalScale,ref rotate,ref pan);
-        },95*WorkspaceControls.Scale);
-        ImGui.TextDisabled("Left-drag to rotate, right-drag to pan, scroll to zoom.");
-        ImGui.Combo("Preview backdrop", ref background, BackgroundNames, BackgroundNames.Length);
-        if (notes.Length > 0) ImGui.TextWrapped(notes);
+            if (WindowSize.X>0 && WindowSize.Y>0)
+            {
+                uint Sample(Vector2 p)
+                {
+                    var c=WindowShell.BackdropColor(Vector2.Clamp((p-WindowOrigin)/WindowSize,Vector2.Zero,Vector2.One));
+                    return 0xff000000u|((uint)c.X<<16)|((uint)c.Y<<8)|(uint)c.Z;
+                }
+                pendingColors=(Sample(tl),Sample(new(br.X,tl.Y)),Sample(new(tl.X,br.Y)),Sample(br));
+            }
+        });
+        if(notes.Length>0 && ImGui.IsItemHovered())ImGui.SetTooltip(notes);
     }
 
     private void Update(IFramework _)
@@ -178,10 +192,17 @@ internal sealed unsafe class CharacterPreview : IDisposable
             UpdateBackground();
             var character = view->GetCharacter();
             var hasModel = character != null && character->GetCharacterBase() != null;
-            if (!cameraReady && view->Camera != null && hasModel)
+            if ((!cameraReady || resetCamera) && view->Camera != null && hasModel)
             {
                 view->ResetPositions();
                 cameraReady = true;
+                resetCamera=false;
+                pan=rotate=Vector2.Zero;zoomDelta=0;
+            }
+            if(cameraReady && hasModel && character->IsReadyToDraw() && appliedPose!=WeaponDrawn)
+            {
+                view->ToggleDrawWeapon(WeaponDrawn);
+                appliedPose=WeaponDrawn;
             }
             if (cameraReady && rotate != Vector2.Zero) view->SetCameraYawAndPitch(rotate.X, rotate.Y);
             if (cameraReady && pan != Vector2.Zero) view->SetCameraXAndY(pan.X, pan.Y);
@@ -225,27 +246,35 @@ internal sealed unsafe class CharacterPreview : IDisposable
 
     private void UpdateBackground()
     {
-        if (background == (int)Background.GameDefault)
+        var renderer=OffscreenRenderingManager.Instance();
+        if(renderer==null || pendingColors is not {} colors || (renderer==backgroundOwner && installedColors==colors))return;
+        if(Environment.TickCount64<nextTextureAttempt)return;
+        nextTextureAttempt=Environment.TickCount64+250;
+        const int size=32;
+        var texture=Texture.CreateTexture2D(size,size,1,TextureFormat.B8G8R8A8_UNORM,
+            TextureFlags.TextureType2D|TextureFlags.Managed|TextureFlags.Immutable,7);
+        if(texture==null)return;
+        uint* pixels=stackalloc uint[size*size];
+        static Vector3 Unpack(uint color)=>new((color>>16)&255,(color>>8)&255,color&255);
+        for(int y=0;y<size;y++)
         {
-            if (backgroundOwner != null) RestoreBackground();
-            return;
+            float v=(y+.5f)/size;
+            var left=Vector3.Lerp(Unpack(colors.TL),Unpack(colors.BL),v);
+            var right=Vector3.Lerp(Unpack(colors.TR),Unpack(colors.BR),v);
+            for(int x=0;x<size;x++)
+            {
+                var c=Vector3.Lerp(left,right,(x+.5f)/size);
+                pixels[y*size+x]=0xff000000u|((uint)MathF.Round(c.X)<<16)|((uint)MathF.Round(c.Y)<<8)|(uint)MathF.Round(c.Z);
+            }
         }
-        var renderer = OffscreenRenderingManager.Instance();
-        var utility = CharacterUtility.Instance();
-        if (renderer == null || utility == null) return;
-        var handle = background == (int)Background.Black ? utility->BlackTextureResourceHandle : utility->WhiteTextureResourceHandle;
-        if (handle == null || handle->Texture == null) return;
-        var texture = handle->Texture;
-        if (backgroundOwner == renderer && installedBackground == texture) return;
+        if(!texture->InitializeContents(pixels)){texture->DecRef();return;}
         RestoreBackground();
-
-        // Transfer the slot's existing reference to this preview until it closes.
-        texture->IncRef();
+        // Transfer our texture reference to the slot and keep its previous reference for restoration.
         previousBackground = renderer->BackgroundTextures[(int)Slot];
         renderer->BackgroundTextures[(int)Slot] = texture;
         installedBackground = texture;
         backgroundOwner = renderer;
-        log.Information($"Installed {BackgroundNames[background]} renderer background for preview slot {Slot}.");
+        installedColors=colors;
     }
 
     private void RestoreBackground()
@@ -262,6 +291,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
             // The renderer already replaced its copy and released that reference.
             previousBackground->DecRef();
         }
+        installedColors=null;
         backgroundOwner = null;
         installedBackground = previousBackground = null;
     }
@@ -294,6 +324,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
         zoomDelta = 0;
         rotate = pan = Vector2.Zero;
         cameraReady = false;
+        appliedPose=null;
         RestoreBackground();
         view->Release();
         view->Dtor(1);
