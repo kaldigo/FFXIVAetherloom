@@ -52,7 +52,7 @@ internal sealed class WardrobeWindow : Window, IWardrobe
         if(File.Exists(file))saved=JObject.Parse(File.ReadAllText(file));
         Plans=(JObject?)saved["Plans"]??new();assignments=(JObject?)saved["Assignments"]??new();
         dyes=data.GetExcelSheet<Stain>().Where(s=>s.RowId is >0 and <256 && s.Name.ExtractText().Length>0).OrderBy(s=>s.SubOrder)
-            .Select(s=>new WardrobeDye((byte)s.RowId,s.Name.ExtractText(),0xff000000u|(s.Color&255)<<16|(s.Color&0xff00)|(s.Color>>16&255),Math.Clamp(s.Shade-1,0,7))).ToArray();
+            .Select(s=>new WardrobeDye((byte)s.RowId,s.Name.ExtractText(),0xff000000u|(s.Color&255)<<16|(s.Color&0xff00)|(s.Color>>16&255),WardrobeDye.FamilyFromShade(s.Shade))).ToArray();
         if(saved["FavoriteDyes"] is JArray favorites)FavoriteDyes.UnionWith(favorites.Values<byte>());
         layout=new(this);
     }
@@ -245,17 +245,19 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     }
     public ISet<byte> FavoriteDyes{get;}=new HashSet<byte>();
     public void ToggleFavorite(byte id){if(!FavoriteDyes.Remove(id))FavoriteDyes.Add(id);saved["FavoriteDyes"]=new JArray(FavoriteDyes);Write();}
-    public bool DisplayOption(string key)
+    public bool? DisplayOption(string key)
     {
         if(key=="Draw")return preview.WeaponDrawn;
         var entry=Equipment[key];
-        return entry?.Value<bool>("Apply")==true ? entry.Value<bool>(key=="Visor"?"IsToggled":"Show") : preview.EquippedOption(key);
+        return entry?.Value<bool>("Apply")==true ? entry.Value<bool>(key=="Visor"?"IsToggled":"Show") : null;
     }
     public void ToggleDisplay(string key)
     {
         if(key=="Draw"){preview.WeaponDrawn=!preview.WeaponDrawn;return;}
-        var value=!DisplayOption(key);
-        Equipment[key]=new JObject{["Apply"]=true,[key=="Visor"?"IsToggled":"Show"]=value};
+        var entry=Entry(key);
+        bool? next=DisplayOption(key) switch{null=>true,true=>false,false=>null};
+        entry["Apply"]=next.HasValue;
+        if(next.HasValue)entry[key=="Visor"?"IsToggled":"Show"]=next.Value;
         Save();
     }
     public void ResetCamera()=>preview.ResetCamera();

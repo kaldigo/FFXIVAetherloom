@@ -1,1 +1,1 @@
-Full-height character preview with fixed-width side panes and a colour-matched renderer backdrop. Added design controls for sheathed arms, headgear, visor and Viera ears, preview-only draw and camera reset, and clearer dye selection.
+Design display controls now cycle between enabled, explicitly off, and disabled. Corrected all eight dye families and updated the dye, gear, hairstyle, face paint and colour pickers with framed popups, selection indicators and consistent spacing.

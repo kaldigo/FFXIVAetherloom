@@ -41,13 +41,6 @@ internal sealed unsafe class CharacterPreview : IDisposable
     private bool? appliedPose;
     private bool resetCamera;
     public void ResetCamera() => resetCamera=true;
-    public bool EquippedOption(string key)
-    {
-        if(objects.LocalPlayer is not {} actor)return key!="Visor";
-        var draw=&((Character*)actor.Address)->DrawData;
-        return key switch {"Hat"=>!draw->IsHatHidden,"Weapon"=>!draw->IsWeaponHidden,
-            "VieraEars"=>!draw->VieraEarsHidden,"Visor"=>draw->IsVisorToggled,_=>false};
-    }
     private readonly PreviewCameraInput cameraInput = new();
     private bool requested;
     private nint player, textureId;

@@ -5,7 +5,11 @@ using Dalamud.Bindings.ImGui;
 namespace Aetherloom;
 
 internal record WardrobeItem(uint Id,string Name,uint Icon,int Channels,string Jobs="");
-internal record WardrobeDye(byte Id,string Name,uint Color,int Family);
+internal record WardrobeDye(byte Id,string Name,uint Color,int Family)
+{
+    // Stain uses shade 2 for neutrals and 4 through 10 for red through special.
+    public static int FamilyFromShade(int shade)=>Math.Clamp(shade-3,0,7);
+}
 internal record WardrobeStyle(byte Id,string Name,uint Icon);
 internal record WardrobeSlot(string Key,string Label,WardrobeItem Item,byte First,byte Second,bool Apply);
 internal interface IWardrobe
@@ -40,7 +44,7 @@ internal interface IWardrobe
     bool HasCharacter {get;}
     ISet<byte> FavoriteDyes {get;}
     void ToggleFavorite(byte id);
-    bool DisplayOption(string key);
+    bool? DisplayOption(string key);
     void ToggleDisplay(string key);
     void ResetCamera();
     void PreviewOptions();
@@ -102,10 +106,13 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
             if(key=="Draw")ImGui.SetCursorPosX(right-60*S-ImGui.GetStyle().ItemSpacing.X);
             bool previewOnly=key is "Draw" or "Reset";
             ImGui.BeginDisabled(!previewOnly && wardrobe.Selected==Guid.Empty);
-            bool clicked=WorkspaceControls.RoundAction(label,key!="Reset" && wardrobe.DisplayOption(key),(dl,c,side,color)=>{
+            bool? state=key=="Reset"?null:wardrobe.DisplayOption(key);
+            uint? tint=previewOnly?null:state switch{true=>0xff99d588u,false=>0xff8282f3u,null=>0xff968e88u};
+            var hint=previewOnly?label:label+" - "+(state switch{true=>"On",false=>"Off",null=>"Disabled (keep current setting)"});
+            bool clicked=WorkspaceControls.RoundAction(label,state==true,(dl,c,side,color)=>{
                 foreach(var path in paths)
                     for(int i=1;i<path.Length;i++)dl.AddLine(c+side*path[i-1],c+side*path[i],color,1.8f*S);
-            });
+            },tint,hint);
             ImGui.EndDisabled();
             if(clicked){if(key=="Reset")wardrobe.ResetCamera();else wardrobe.ToggleDisplay(key);}
         }
@@ -233,11 +240,19 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
     private void GearPicker(WardrobeSlot slot)
     {
         if(!WorkspaceControls.BeginPicker("items",346,435))return;
-        Heading("Select "+slot.Label.ToLowerInvariant()+" gear");
-        ImGui.SetNextItemWidth(-1);if(ImGui.InputTextWithHint("##search","Search gear",ref search,100))itemPage=0;
+        WorkspaceControls.PickerHeading("Select "+slot.Label.ToLowerInvariant()+" gear");
+        ImGui.TextDisabled(wardrobe.Title);
+        ImGui.SetNextItemWidth(-1);if(ImGui.InputTextWithHint("##search","Search "+slot.Label.ToLowerInvariant()+" gear",ref search,100))itemPage=0;
+        float segment=(ImGui.GetContentRegionAvail().X-2*ImGui.GetStyle().ItemSpacing.X)/3;
         foreach(var mode in new[]{"All","Owned","Missing"})
-        {if(mode!="All")ImGui.SameLine();if(ImGui.RadioButton(mode,itemFilter==mode)){itemFilter=mode;itemPage=0;}}
-        ImGui.BeginChild("results",new Vector2(318,275)*S,false);
+        {
+            if(mode!="All")ImGui.SameLine();
+            bool active=itemFilter==mode;
+            if(active)ImGui.PushStyleColor(ImGuiCol.Button,new Vector4(.12f,.42f,.40f,1));
+            if(ImGui.Button(mode,new Vector2(segment,0))){itemFilter=mode;itemPage=0;}
+            if(active)ImGui.PopStyleColor();
+        }
+        ImGui.BeginChild("results",new Vector2(-1,275*S),false);
         int matches=0;
         foreach(var item in wardrobe.Catalog(slot.Key).Where(i=>i.Name.Contains(search,StringComparison.OrdinalIgnoreCase)))
         {
@@ -248,38 +263,41 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
             if(WorkspaceControls.Tile("##"+item.Id,item.Name,status,wardrobe.Icon(item.Icon),slot.Item.Id==item.Id,status=="Missing",ImGui.GetContentRegionAvail().X))
             {wardrobe.SetItem(slot.Key,item.Id);ImGui.CloseCurrentPopup();}
         }
+        if(matches==0)ImGui.TextDisabled("No matching gear.");
         ImGui.EndChild();
         if(itemPage>0 && ImGui.SmallButton("Previous"))itemPage--;
         if(matches>24*(itemPage+1) && ImGui.SmallButton("Next"))itemPage++;
-        ImGui.EndPopup();
+        WorkspaceControls.EndPicker();
     }
     private void DyePicker(WardrobeSlot slot,int channel,string popup)
     {
-        if(!WorkspaceControls.BeginPicker(popup,332,335))return;
-        Heading($"{slot.Label}  \u00b7  Dye channel {channel+1}");
+        if(!WorkspaceControls.BeginPicker(popup,296,350))return;
+        WorkspaceControls.PickerHeading($"{slot.Label}  \u00b7  Dye {channel+1}");
         var chosen=channel==0?slot.First:slot.Second;
         var current=wardrobe.Dyes.FirstOrDefault(x=>x.Id==chosen);
-        ImGui.TextDisabled("Selected"); ImGui.SameLine();ImGui.TextUnformatted(current?.Name??"No dye");
-        ImGui.Spacing();ImGui.Separator();ImGui.Spacing();
+        var caption=current?.Name??"No dye";
         for(int i=0;i<Families.Length;i++)
-        {if(i!=0)ImGui.SameLine();if(WorkspaceControls.Swatch("family"+i,Families[i],new[]{"Neutral","Red","Brown","Yellow","Green","Blue","Purple","Special"}[i],i==family,25,true))family=i;}
+        {if(i!=0)ImGui.SameLine(0,7*S);if(WorkspaceControls.Swatch("family"+i,Families[i],new[]{"Neutral","Red","Brown","Yellow","Green","Blue","Purple","Special"}[i],i==family,26,true,i==7))family=i;}
         ImGui.Spacing();
         void Palette(IEnumerable<WardrobeDye> dyes,string prefix)
         {
+            int columns=prefix=="color"?6:8;
+            float cell=(ImGui.GetContentRegionAvail().X/S-3*(columns-1))/columns;
             int i=0;foreach(var dye in dyes)
             {
-                if(i++%8!=0)ImGui.SameLine();
-                if(WorkspaceControls.Swatch(prefix+dye.Id,dye.Color,dye.Name,dye.Id==chosen,29))
+                if(i++%columns!=0)ImGui.SameLine(0,3*S);
+                if(WorkspaceControls.Swatch(prefix+dye.Id,dye.Color,dye.Name,dye.Id==chosen,27,width:cell))
                 {wardrobe.SetDye(slot.Key,channel,dye.Id);ImGui.CloseCurrentPopup();}
+                if(ImGui.IsItemHovered())caption=dye.Name;
                 if(ImGui.IsItemClicked(ImGuiMouseButton.Right))wardrobe.ToggleFavorite(dye.Id);
             }
         }
         Palette(wardrobe.Dyes.Where(d=>d.Family==family),"color");
-        ImGui.Spacing();
+        ImGui.TextUnformatted(caption);
         ImGui.Separator();ImGui.TextDisabled("Favorites");Palette(wardrobe.Dyes.Where(d=>wardrobe.FavoriteDyes.Contains(d.Id)).ToArray(),"favorite");
-        if(wardrobe.FavoriteDyes.Count==0)ImGui.TextDisabled("Right-click a dye to save a favourite.");
-        ImGui.Spacing();if(ImGui.SmallButton("Remove dye")){wardrobe.SetDye(slot.Key,channel,0);ImGui.CloseCurrentPopup();}
-        ImGui.EndPopup();
+        if(wardrobe.FavoriteDyes.Count==0)ImGui.TextDisabled("Right-click a dye to add it here.");
+        ImGui.Separator();if(ImGui.Button("Remove dye")){wardrobe.SetDye(slot.Key,channel,0);ImGui.CloseCurrentPopup();}
+        WorkspaceControls.EndPicker();
     }
     private void DrawAssignments()
     {
@@ -321,16 +339,17 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         var chosen=wardrobe.Style(key);
         ImGui.TextUnformatted(title);ImGui.SameLine();
         if(WorkspaceControls.Swatch("##"+key,wardrobe.AppearanceColor(key,chosen),title))ImGui.OpenPopup(key);
-        if(!WorkspaceControls.BeginPicker(key,304,345))return;
-        Heading(title);
+        AutoOpen(key,key);
+        if(!WorkspaceControls.BeginPicker(key,310,430))return;
+        WorkspaceControls.PickerHeading(title);
         for(int i=0;i<192;i++)
         {
             var id=(byte)(i+(key=="FacePaintColor" && i>=96?32:0));
-            if(i%12!=0)ImGui.SameLine(0,2*S);
+            if(i%12!=0)ImGui.SameLine(0,3*S);
             if(WorkspaceControls.Swatch("##"+id,wardrobe.AppearanceColor(key,id),id.ToString(),id==chosen,20))
             {wardrobe.SetStyle(key,id);ImGui.CloseCurrentPopup();}
         }
-        ImGui.EndPopup();
+        WorkspaceControls.EndPicker();
     }
     private void StyleRow(string key,string title)
     {
@@ -339,15 +358,16 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         if(WorkspaceControls.Tile(key,title,current?.Name?? $"Style {selected}",wardrobe.Icon(current?.Icon??0),false,false,ImGui.GetContentRegionAvail().X))ImGui.OpenPopup(key+"-grid");
         AutoOpen(key,key+"-grid");
         if(!WorkspaceControls.BeginPicker(key+"-grid",345,325))return;
-        Heading(title);
-        ImGui.BeginChild("styles",new Vector2(320,244)*S,false);
+        WorkspaceControls.PickerHeading(key=="FacePaint"?"Face paint":title);
+        ImGui.BeginChild("styles",new Vector2(-1,248*S),false);
         for(int i=0;i<styles.Length;i++)
         {
-            var style=styles[i];if(i%5!=0)ImGui.SameLine();
-            if(WorkspaceControls.Thumbnail("##"+style.Id,wardrobe.Icon(style.Icon),style.Name,selected==style.Id,52))
+            var style=styles[i];if(i%4!=0)ImGui.SameLine();
+            if(WorkspaceControls.Thumbnail("##"+style.Id,wardrobe.Icon(style.Icon),style.Name,selected==style.Id,69))
             {wardrobe.SetStyle(key,style.Id);ImGui.CloseCurrentPopup();}
         }
-        ImGui.EndChild();ImGui.EndPopup();
+        if(styles.Length==0)ImGui.TextDisabled("No styles available for this character.");
+        ImGui.EndChild();WorkspaceControls.EndPicker();
     }
 }
 
