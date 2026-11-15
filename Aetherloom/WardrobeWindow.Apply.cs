@@ -75,11 +75,12 @@ internal sealed partial class WardrobeWindow
         }
     }
 
+    private static bool IsEmptyItem(ulong id)=>id==0 || id is <= uint.MaxValue-128 and >= uint.MaxValue-150
+            || id is <= uint.MaxValue-384 and >= uint.MaxValue-639;
+
     private bool CanApplyItem(ulong id)
     {
-        // Zero and Glamourer's slot-specific Nothing IDs represent an explicitly empty slot.
-        if(id==0 || id is <= uint.MaxValue-128 and >= uint.MaxValue-150
-            || id is <= uint.MaxValue-384 and >= uint.MaxValue-639)return true;
+        if(IsEmptyItem(id))return true;
         return id<=uint.MaxValue && ownership.Availability((uint)id) is not ("Missing" or "Unconfirmed");
     }
 }

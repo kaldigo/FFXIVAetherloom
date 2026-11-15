@@ -76,3 +76,15 @@ if(WardrobeAssignment.Resolve(bindings,123,12,100,plans.ContainsKey)!=null
     || WardrobeAssignment.Resolve(bindings,123,10,200,id=>id!=zoneDesign)?.Design!=jobDesign)
     throw new Exception("Unassigned or deleted design fallback failed.");
 Console.WriteLine("Job and zone assignment checks passed.");
+
+var wearablePlan=JObject.Parse("""{"Equipment":{"Body":{"ItemId":1,"Apply":true},"Ears":{"ItemId":2,"Apply":false,"ApplyStain":true}},"AdditionalMainHands":{"MainHand/2":{"ItemId":3,"Apply":true}},"Tags":["gender:Male"],"BypassOwnership":true}""");
+int ItemMask(ulong id)=>id switch {1=>WardrobeWearability.Everyone,2=>0x101,3=>0x280,_=>0};
+int Mask()=>WardrobeWearability.DesignMask(wearablePlan,["Body","Ears"],ItemMask);
+var gearMask=Mask();
+if(!WardrobeWearability.Allows(gearMask,8,1) || WardrobeWearability.Allows(gearMask,1,1) || WardrobeWearability.Allows(gearMask,8,0))
+    throw new Exception("Re-evaluate the same equipment against the visible race and gender.");
+wearablePlan["Equipment"]!["Ears"]!["Apply"]=true;
+if(WardrobeWearability.Allows(Mask(),8,1))throw new Exception("An incompatible accessory must hide the design.");
+wearablePlan.Remove("AdditionalMainHands");
+if(!WardrobeWearability.Allows(Mask(),1,0))throw new Exception("Compatible restricted gear must remain available.");
+Console.WriteLine("Wardrobe wearability checks passed.");

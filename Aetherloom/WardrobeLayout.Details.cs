@@ -7,7 +7,8 @@ namespace Aetherloom;
 internal sealed partial class WardrobeLayout
 {
     private readonly Dictionary<string,HashSet<string>> filters=WardrobeMetadata.Filters.ToDictionary(g=>g,_=>new HashSet<string>(StringComparer.OrdinalIgnoreCase));
-    private int FilterCount=>filters.Values.Count(set=>set.Count>0);
+    private bool onlyAvailable;
+    private int FilterCount=>filters.Values.Count(set=>set.Count>0)+(onlyAvailable?1:0);
     private string optionSearch="";
     private static readonly Dictionary<string,uint> Swatches=new(StringComparer.OrdinalIgnoreCase)
     {
@@ -64,10 +65,12 @@ internal sealed partial class WardrobeLayout
         if(IconAction("Wardrobe filters",FilterCount))ImGui.OpenPopup("filters");
         AutoOpen("filters","filters");
         var anchor=ImGui.GetItemRectMax()+new Vector2(-12,8)*S;
-        if(!WorkspaceControls.BeginPicker("filters",330,362,anchor))return MatchingDesigns();
+        if(!WorkspaceControls.BeginPicker("filters",330,395,anchor))return MatchingDesigns();
         try
         {
             WorkspaceControls.PickerHeading("Wardrobe filters");
+            ImGui.Checkbox("Only available glamours",ref onlyAvailable);
+            if(ImGui.IsItemHovered())ImGui.SetTooltip("Show gear wearable by your current Glamourer race and gender, including unowned items.");
             foreach(var group in WardrobeMetadata.Filters)
             {
                 if(group=="Classification")ImGui.Separator();
@@ -76,7 +79,11 @@ internal sealed partial class WardrobeLayout
                 finally { ImGui.PopID(); }
             }
             ImGui.Separator();
-            if(ImGui.SmallButton("Clear filters"))foreach(var chosen in filters.Values)chosen.Clear();
+            if(ImGui.SmallButton("Clear filters"))
+            {
+                onlyAvailable=false;
+                foreach(var chosen in filters.Values)chosen.Clear();
+            }
             var result=MatchingDesigns();
             var count=$"{result.Length} matching design{(result.Length==1?"":"s")}";
             ImGui.SameLine();ImGui.SetCursorPosX(ImGui.GetCursorPosX()+Math.Max(0,ImGui.GetContentRegionAvail().X-ImGui.CalcTextSize(count).X));
@@ -129,7 +136,8 @@ internal sealed partial class WardrobeLayout
             || WardrobeMetadata.ContainsText(WardrobeMetadata.Single(WardrobeMetadata.Intended,d.Metadata),word)
             || WardrobeMetadata.ContainsText(WardrobeMetadata.Single(WardrobeMetadata.Gender,d.Metadata),word)
             || wardrobe.JobTerms(d.Id).Any(term=>term.Contains(word,StringComparison.OrdinalIgnoreCase)))
-            && (!filtered || WardrobeMetadata.Matches(d.Metadata,filters,()=>wardrobe.WeaponTerms(d.Id)))).ToArray();
+            && (!filtered || WardrobeMetadata.Matches(d.Metadata,filters,()=>wardrobe.WeaponTerms(d.Id)))
+            && (!onlyAvailable || wardrobe.Wearable(d.Id))).ToArray();
     }
 
     private IEnumerable<string> Options(string group)

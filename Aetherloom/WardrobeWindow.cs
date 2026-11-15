@@ -69,6 +69,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     public override void Draw()
     {
         if(Environment.TickCount64>=nextRefresh)Refresh();
+        BeginWearableFrame();
         AdvanceImport();
         preview.WindowOrigin=ImGui.GetWindowPos();preview.WindowSize=ImGui.GetWindowSize();
         layout.Draw(()=>IsOpen=false);
@@ -92,6 +93,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
             }
             KnownTags=entries.SelectMany(d=>d.Tags).Where(WardrobeLibrary.VisibleTag).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
             weaponJobTerms.Clear();
+            wearableGear.Clear();
             var previous=library.GetValueOrDefault(Selected);
             library=entries.Where(d=>WardrobeLibrary.Tagged(d.Tags,WardrobeLibrary.Tag)).ToDictionary(d=>d.Id);
             Folders=root["Folders"]!.ToObject<string[]>()!.Where(WardrobeLibrary.Managed).ToArray();
@@ -163,6 +165,7 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
     private void Save()
     {
         weaponJobTerms.Remove(Selected);
+        wearableGear.Remove(Selected);
         projection=null;design["LibraryLinked"]=true;design["Tags"]=new JArray(Tags);design["Name"]=Title;Plans[Selected.ToString()]=design.DeepClone();
         Write();
     }

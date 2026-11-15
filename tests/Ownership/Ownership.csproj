@@ -8,6 +8,7 @@
   <ItemGroup>
     <Compile Include="../../Aetherloom/OwnershipSnapshot.cs" />
     <Compile Include="../../Aetherloom/WardrobeApplication.cs" />
+    <Compile Include="../../Aetherloom/WardrobeWearability.cs" />
     <Compile Include="../../Aetherloom/WardrobeAssignment.cs" />
     <Reference Include="Newtonsoft.Json">
       <HintPath Condition="Exists('$(DALAMUD_HOME)/Newtonsoft.Json.dll')">$(DALAMUD_HOME)/Newtonsoft.Json.dll</HintPath>

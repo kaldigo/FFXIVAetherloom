@@ -42,6 +42,7 @@ internal interface IWardrobe
     IReadOnlyList<string> KnownTags {get;}
     IEnumerable<string> JobTerms(Guid id);
     IEnumerable<string> WeaponTerms(Guid id);
+    bool Wearable(Guid id);
     IEnumerable<WardrobeSlot> Slots(bool accessories);
     IEnumerable<WardrobeItem> Catalog(string slot);
     IEnumerable<WardrobeDye> Dyes { get; }
@@ -221,6 +222,12 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         var matching=SearchAndFilters();
         bool filtering=!string.IsNullOrWhiteSpace(filter) || FilterCount>0;
         ImGui.Spacing();ImGui.Separator();
+        bool visible=ImGui.BeginChild("wardrobe-library",Vector2.Zero);
+        try { if(visible)DrawLibrary(matching,filtering); }
+        finally { ImGui.EndChild(); }
+    }
+    private void DrawLibrary(LibraryDesign[] matching,bool filtering)
+    {
         if(WorkspaceControls.TreeRow("root","Wardrobe root",folder.Length==0,true))folder="";
         DropOn("");
         var designs=matching.OrderBy(d=>d.Name,StringComparer.OrdinalIgnoreCase)
