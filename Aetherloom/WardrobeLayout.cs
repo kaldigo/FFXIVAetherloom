@@ -83,7 +83,7 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
         } finally { ImGui.PopStyleColor(6); }
     }
     private void Body()=>WorkspaceControls.Split("wardrobe-panes",
-        new("designs",205,Sidebar,true),new("editor",1,Editor),new("character",345,PreviewPanel,true));
+        new("designs",205,Sidebar,true),new("editor",1,Editor),new("character",345,PreviewPanel,true,true));
 
     private static readonly (string Key,string Label,Vector2[][] Paths)[] PreviewActions=[
         ("Weapon","Display sheathed arms",[[new(-.23f,-.25f),new(.16f,.14f),new(.09f,.2f),new(-.23f,-.25f)],[new(.02f,.18f),new(.2f,0)],[new(.12f,.12f),new(.24f,.24f)]]),
@@ -95,11 +95,12 @@ internal sealed class WardrobeLayout(IWardrobe wardrobe)
     private void PreviewPanel()
     {
         float height=Math.Max(1,ImGui.GetContentRegionAvail().Y-40*S);
-        if(ImGui.BeginChild("character-image",new Vector2(-1,height),false,ImGuiWindowFlags.NoScrollbar|ImGuiWindowFlags.NoScrollWithMouse))
+        if(ImGui.BeginChild("character-image",new Vector2(0,height),false,ImGuiWindowFlags.NoScrollbar|ImGuiWindowFlags.NoScrollWithMouse))
             wardrobe.DrawPreview();
         ImGui.EndChild();
         if(ImGui.BeginPopupContextItem("preview-options",ImGuiPopupFlags.MouseButtonMiddle)){wardrobe.PreviewOptions();ImGui.EndPopup();}
-        float right=ImGui.GetCursorPosX()+ImGui.GetContentRegionAvail().X;
+        float right=ImGui.GetCursorPosX()+ImGui.GetContentRegionAvail().X-8*S;
+        ImGui.SetCursorPosX(ImGui.GetCursorPosX()+8*S);
         foreach(var (key,label,paths) in PreviewActions)
         {
             if(key!="Weapon")ImGui.SameLine();

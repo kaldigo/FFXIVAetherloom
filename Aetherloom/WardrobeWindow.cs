@@ -173,7 +173,7 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     public unsafe IEnumerable<WardrobeStyle> Styles(string key)
     {
         if(objects.LocalPlayer is not {} actor)return [];
-        var c=((Character*)actor.Address)->DrawData.CustomizeData;
+        var c=CharacterPreview.VisibleCustomize((Character*)actor.Address);
         if(c.Tribe==0||c.Sex>1)return [];
         var cache=(c.Tribe,c.Sex,c.Face,key);
         if(styles.TryGetValue(cache,out var found))return found;
@@ -205,7 +205,7 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     {
         colors??=data.GetFile("chara/xls/charamake/human.cmp")?.Data??[];
         var actor=objects.LocalPlayer;if(actor==null)return 0xff4c4c4c;
-        var c=((Character*)actor.Address)->DrawData.CustomizeData;
+        var c=CharacterPreview.VisibleCustomize((Character*)actor.Address);
         // human.cmp contains two 2304-color global blocks followed by 1280 colors per clan/sex.
         int index=key switch{
             "HairColor"=>4608+((c.Tribe-1)*2+c.Sex)*1280+1024+value,
@@ -217,7 +217,7 @@ internal sealed class WardrobeWindow : Window, IWardrobe
     {
         if(Look[key]?.Value<byte?>("Value") is {} value)return value;
         if(objects.LocalPlayer is not {} actor)return 0;
-        var c=((Character*)actor.Address)->DrawData.CustomizeData;
+        var c=CharacterPreview.VisibleCustomize((Character*)actor.Address);
         return key switch{"Hairstyle"=>c.Hairstyle,"HairColor"=>c.HairColor,"HighlightsColor"=>c.HighlightsColor,
             "FacePaint"=>c.FacePaint,"FacePaintColor"=>c.FacePaintColor,"Highlights"=>(byte)(c.Highlights?128:0),
             "FacePaintReversed"=>(byte)(c.FacePaintReversed?128:0),_=>0};

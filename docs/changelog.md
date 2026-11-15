@@ -1,1 +1,1 @@
-Design display controls now cycle between enabled, explicitly off, and disabled. Corrected all eight dye families and updated the dye, gear, hairstyle, face paint and colour pickers with framed popups, selection indicators and consistent spacing.
+The wardrobe preview now fills its pane edge to edge, uses the visible character model as its appearance baseline, and holds the previous image and camera framing through gear and design changes.

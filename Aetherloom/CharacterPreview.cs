@@ -5,6 +5,8 @@ using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Plugin.Services;
+using Dalamud.Interface.Textures.TextureWraps;
+using System.Threading.Tasks;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Render;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Kernel;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
@@ -28,6 +30,19 @@ internal sealed unsafe class CharacterPreview : IDisposable
     private readonly IPluginLog log;
     private readonly IDataManager data;
     private JObject? selectedDesign, loadedDesign;
+    private readonly ITextureProvider textures;
+    private Task<IDalamudTextureWrap>? copying;
+    private IDalamudTextureWrap? still;
+    private int width,height;
+    private CharaViewModelData baseline,loadedModel;
+    private long nextBaselineCheck;
+    private bool firstFrame;
+    private readonly List<(Vector2 Rotate,Vector2 Pan,float Zoom)> cameraMoves=[];
+    // The renderer owns this handle. Dalamud takes its own reference when it starts the copy.
+    private sealed record RenderImage(ImTextureID Handle,int Width,int Height):IDalamudTextureWrap
+    {
+        public void Dispose(){}
+    }
     private bool previewDesign;
     private string notes = "";
     private CharaView* view;
@@ -52,22 +67,24 @@ internal sealed unsafe class CharacterPreview : IDisposable
     private string status = "";
     private (uint State, bool BaseLoaded, string Stage)? lastProgress;
 
-    public CharacterPreview(IFramework framework, IGameGui gameGui, ICondition conditions, IObjectTable objects, IAddonLifecycle addons, IPluginLog log, IDataManager data)
+    public CharacterPreview(IFramework framework, IGameGui gameGui, ICondition conditions, IObjectTable objects, IAddonLifecycle addons, IPluginLog log, IDataManager data,ITextureProvider textures)
     {
         (this.framework, this.gameGui, this.conditions, this.objects, this.addons) = (framework, gameGui, conditions, objects, addons);
         this.log = log;
         this.data = data;
+        this.textures=textures;
         framework.Update += Update;
         addons.RegisterListener(AddonEvent.PreSetup, "BannerParty", OnPartyPortraits);
     }
 
-    public void Start(bool design) { requested=true; previewDesign=design; status=""; }
+    public void Start(bool design) { cameraMoves.Clear();resetCamera=true; requested=true; previewDesign=design; status=""; }
 
     public void Close()
     {
         cameraInput.EndDrag();
         requested = false;
         textureId = 0;
+        DiscardStill();
         status = "";
     }
 
@@ -96,12 +113,13 @@ internal sealed unsafe class CharacterPreview : IDisposable
     {
         lastDraw=Environment.TickCount64;
         selectedDesign=design;
-        if (!requested || textureId==0 || !ReferenceEquals(loadedDesign,previewDesign?design:null))
+        var image=still?.Handle??new ImTextureID((ulong)textureId);
+        if (!requested || (textureId==0 && still==null))
         {
             ImGui.TextWrapped(status.Length>0?status:requested?"Loading character preview...":"Preview stopped.");
             return;
         }
-        WorkspaceControls.FillViewport("##character-camera",new Picture(new ImTextureID((ulong)textureId)),aspect,(tl,br)=>
+        WorkspaceControls.FillViewport("##character-camera",new Picture(image),aspect,(tl,br)=>
         {
             var io=ImGui.GetIO();
             if(ImGui.IsItemHovered()) { ImGuiP.SetItemUsingMouseWheel(); zoomDelta-=io.MouseWheel; }
@@ -123,7 +141,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
     {
         if (!requested) { Release(); return; }
         var desired = previewDesign ? selectedDesign : null;
-        if (view != null && !ReferenceEquals(desired, loadedDesign)) Release();
+
         if (conditions[ConditionFlag.BetweenAreas] || conditions[ConditionFlag.BetweenAreas51]
             || objects.LocalPlayer is not { } actor || (view != null && actor.Address != player))
         {
@@ -137,44 +155,46 @@ internal sealed unsafe class CharacterPreview : IDisposable
         }
         if (Environment.TickCount64 - lastDraw > 3000)
         {
-            Release();
+            DiscardStill();Release();
             return;
         }
-        if (view == null)
+        var source=(Character*)actor.Address;
+        var now=Environment.TickCount64;
+        bool changed=!ReferenceEquals(desired,loadedDesign);
+        if(view==null || changed || now>=nextBaselineCheck || copying!=null)
         {
-            if (objects[ActorIndex] != null) { Pause("Waiting for the preview slot to become available."); return; }
-            var source = (Character*)actor.Address;
-            if (source->GetCharacterBase() == null || !source->IsReadyToDraw())
+            if(source->GetCharacterBase()==null || !source->IsReadyToDraw())
             {
-                Pause("Waiting for your equipped character model.");
+                if(view==null)status="Waiting for your visible character model.";
                 return;
             }
-            CharaViewModelData model = default;
-            model.CopyFromCharacter(source);
-            notes = "";
-            if (desired != null)
+            var current=ReadBaseline(source);
+            nextBaselineCheck=now+250;
+            if(view==null || changed || !SameModel(ref current,ref baseline) || copying!=null)
             {
-                if (desired["Equipment"] is not JObject gear || desired["Customize"] is not JObject look
-                    || look.Value<uint>("ModelId") != 0)
+                var model=current;
+                notes="";
+                if(desired!=null)
                 {
-                    Stop("Select a player-character design to preview.");
-                    return;
+                    if(desired["Equipment"] is not JObject gear || desired["Customize"] is not JObject look || look.Value<uint>("ModelId")!=0)
+                    { Stop("Select a player-character design to preview.");return; }
+                    notes=PreviewOutfit.Apply(ref model,gear,look,data);
                 }
-                var currentHair = model.CustomizeData.Hairstyle;
-                notes = PreviewOutfit.Apply(ref model, gear, look, data);
-                var hair = look["Hairstyle"];
-                log.Information($"Prepared design preview: current hair={currentHair}, design hair={hair?.Value<byte?>("Value")}, apply={hair?.Value<bool>("Apply") == true}, preview hair={model.CustomizeData.Hairstyle}. {notes}");
+                if(view==null || !SameModel(ref model,ref loadedModel))
+                {
+                    if(view!=null)
+                    {
+                        if(!HoldLastFrame())return;
+                        Release();
+                    }
+                    if(objects[ActorIndex]!=null){status="Waiting for the preview slot to become available.";return;}
+                    if(!Create(model,actor.Address))return;
+                    log.Debug($"Preview model: base race {source->DrawData.CustomizeData.Race}, visible race {current.CustomizeData.Race}, target race {model.CustomizeData.Race}, retained frame {still!=null}, camera inputs {cameraMoves.Count}.");
+                }
+                else if(copying!=null)DiscardStill();
+                baseline=current;
+                loadedDesign=desired;
             }
-            var space = IMemorySpace.GetUISpace();
-            var memory = space == null ? null : (CharaView*)space->Malloc((ulong)sizeof(CharaView), 16);
-            if (memory == null) { Stop("Could not allocate the character preview."); return; }
-            view = memory->Ctor();
-            view->ModelData = model;
-            view->Initialize(null, Slot, 0);
-            loadedDesign = desired;
-            player = actor.Address;
-            lastImageOrStart = Environment.TickCount64;
-            lastProgress = null;
         }
 
         var native = FFXIVClientStructs.FFXIV.Client.System.Framework.Framework.Instance();
@@ -189,25 +209,30 @@ internal sealed unsafe class CharacterPreview : IDisposable
             {
                 view->ResetPositions();
                 cameraReady = true;
+                if(resetCamera){cameraMoves.Clear();pan=rotate=Vector2.Zero;zoomDelta=0;}
+                else foreach(var move in cameraMoves)MoveCamera(move.Rotate,move.Pan,move.Zoom);
                 resetCamera=false;
-                pan=rotate=Vector2.Zero;zoomDelta=0;
             }
             if(cameraReady && hasModel && character->IsReadyToDraw() && appliedPose!=WeaponDrawn)
             {
                 view->ToggleDrawWeapon(WeaponDrawn);
                 appliedPose=WeaponDrawn;
             }
-            if (cameraReady && rotate != Vector2.Zero) view->SetCameraYawAndPitch(rotate.X, rotate.Y);
-            if (cameraReady && pan != Vector2.Zero) view->SetCameraXAndY(pan.X, pan.Y);
-            rotate = pan = Vector2.Zero;
-            if (cameraReady && zoomDelta != 0) view->SetCameraDistance(zoomDelta);
-            zoomDelta = 0;
+            if(cameraReady && (rotate!=Vector2.Zero || pan!=Vector2.Zero || zoomDelta!=0))
+            {
+                MoveCamera(rotate,pan,zoomDelta);
+                cameraMoves.Add((rotate,pan,zoomDelta));
+                rotate=pan=Vector2.Zero;zoomDelta=0;
+            }
             var targets = RenderTargetManager.Instance();
             var texture = targets == null ? null : targets->GetCharaViewTexture(Slot);
             if (cameraReady && hasModel && character->IsReadyToDraw()
                 && texture != null && texture->D3D11ShaderResourceView != null && texture->ActualWidth > 0 && texture->ActualHeight > 0)
             {
-                aspect = (float)texture->ActualWidth / texture->ActualHeight;
+                if(firstFrame){firstFrame=false;return;} // Render once with the restored camera before showing the replacement.
+                width=(int)texture->ActualWidth;height=(int)texture->ActualHeight;
+                aspect=(float)width/height;
+                still?.Dispose();still=null;
                 textureId = (nint)texture->D3D11ShaderResourceView;
                 ReportProgress("Displaying character texture.");
                 lastImageOrStart = Environment.TickCount64;
@@ -226,6 +251,88 @@ internal sealed unsafe class CharacterPreview : IDisposable
         ReportProgress(stage);
         if (Environment.TickCount64 - lastImageOrStart > 15000)
             Stop($"Preview timed out at state {view->State}. {stage}");
+    }
+
+    private void MoveCamera(Vector2 turn,Vector2 offset,float zoom)
+    {
+        if(turn!=Vector2.Zero)view->SetCameraYawAndPitch(turn.X,turn.Y);
+        if(offset!=Vector2.Zero)view->SetCameraXAndY(offset.X,offset.Y);
+        if(zoom!=0)view->SetCameraDistance(zoom);
+    }
+
+    internal static CustomizeData VisibleCustomize(Character* character)
+    {
+        var draw=character->GetCharacterBase();
+        return draw!=null && draw->GetModelType()==CharacterBase.ModelType.Human
+            ? ((Human*)draw)->Customize : character->DrawData.CustomizeData;
+    }
+
+    private static CharaViewModelData ReadBaseline(Character* source)
+    {
+        CharaViewModelData result=default;
+        result.CopyFromCharacter(source);
+        var draw=source->GetCharacterBase();
+        if(draw->GetModelType()!=CharacterBase.ModelType.Human)return result;
+        var human=(Human*)draw;
+        result.CustomizeData=human->Customize;
+        human->EquipmentModels[..10].CopyTo(result.EquipmentModelIds);
+        // Draw objects contain the weapon models actually shown after Glamourer overrides.
+        for(int i=0;i<2;i++)
+        {
+            var weapon=source->DrawData.Weapon((DrawDataContainer.WeaponSlot)i).DrawData.DrawObject;
+            if(weapon==null || weapon->Object.GetObjectType()!=FFXIVClientStructs.FFXIV.Client.Graphics.Scene.ObjectType.CharacterBase
+                || ((CharacterBase*)weapon)->GetModelType()!=CharacterBase.ModelType.Weapon)continue;
+            var visible=(Weapon*)weapon;
+            ref var id=ref result.WeaponModelIds[i];
+            id.Id=visible->ModelSetId;id.Type=visible->SecondaryId;id.Variant=visible->Variant;
+            id.Stain0=visible->Stain0;id.Stain1=visible->Stain1;
+        }
+        result.VisorClosed=human->VisorToggled;
+        result.VieraEarsHidden=human->HideVieraEars;
+        return result;
+    }
+
+    private static bool SameModel(ref CharaViewModelData a,ref CharaViewModelData b)
+        => a.CustomizeData.Data.SequenceEqual(b.CustomizeData.Data)
+           && System.Runtime.InteropServices.MemoryMarshal.AsBytes(a.EquipmentModelIds).SequenceEqual(System.Runtime.InteropServices.MemoryMarshal.AsBytes(b.EquipmentModelIds))
+           && System.Runtime.InteropServices.MemoryMarshal.AsBytes(a.WeaponModelIds).SequenceEqual(System.Runtime.InteropServices.MemoryMarshal.AsBytes(b.WeaponModelIds))
+           && a.HeadgearHidden==b.HeadgearHidden && a.WeaponHidden==b.WeaponHidden && a.VisorClosed==b.VisorClosed && a.VieraEarsHidden==b.VieraEarsHidden;
+
+    private bool Create(CharaViewModelData model,nint actor)
+    {
+        var space=IMemorySpace.GetUISpace();
+        var memory=space==null?null:(CharaView*)space->Malloc((ulong)sizeof(CharaView),16);
+        if(memory==null){Stop("Could not allocate the character preview.");return false;}
+        view=memory->Ctor();
+        loadedModel=model;view->ModelData=model;
+        view->Initialize(null,Slot,0);
+        player=actor;lastImageOrStart=Environment.TickCount64;lastProgress=null;firstFrame=true;
+        return true;
+    }
+
+    private bool HoldLastFrame()
+    {
+        if(still!=null || textureId==0 && copying==null)return true;
+        try
+        {
+            copying??=textures.CreateFromExistingTextureAsync(new RenderImage(new ImTextureID((ulong)textureId),width,height),debugName:"Aetherloom previous preview");
+            if(!copying.IsCompleted)return false;
+            still=copying.GetAwaiter().GetResult();
+        }
+        catch(Exception error){log.Warning(error,"Could not retain the previous preview image.");}
+        copying=null;
+        return true;
+    }
+
+    private void DiscardStill()
+    {
+        still?.Dispose();still=null;
+        if(copying is not {} task)return;
+        copying=null;
+        _=task.ContinueWith(t=>{
+            if(t.IsCompletedSuccessfully)t.Result.Dispose();
+            else if(t.IsFaulted)log.Debug(t.Exception!,"Preview frame copy ended after the preview closed.");
+        },TaskScheduler.Default);
     }
 
     private void ReportProgress(string stage)
@@ -298,6 +405,7 @@ internal sealed unsafe class CharacterPreview : IDisposable
     {
         if (status != reason) log.Information(reason);
         status = reason;
+        DiscardStill();
         Release();
     }
 
