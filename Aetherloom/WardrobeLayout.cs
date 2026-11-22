@@ -88,7 +88,7 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
     private string filter="",newName="",newTag="",search="";
     internal string Tab="Gear";
     internal string? OpenPicker;
-    private string itemFilter="All";
+    private string itemFilter="Owned";
     private int family;
     private WardrobeItem[] gearResults=[];
     private object? resultOwnership;
@@ -518,7 +518,7 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
             bool eye=multipleHands && slot.Item.Id!=0 && slot.Key.StartsWith("MainHand");
             var bodyWidth=width-(eye?30*S+ImGui.GetStyle().ItemSpacing.X:0)-(30*slot.Item.Channels+34)*S-ImGui.GetStyle().ItemSpacing.X*(slot.Item.Channels+1);
             if(WorkspaceControls.Tile("item",slot.Item.Name,slot.Label+(source.Length>0?"  ·  "+source:""),wardrobe.Icon(slot.Item.Icon),false,source=="Missing",bodyWidth))
-            {search="";itemFilter="All";ImGui.OpenPopup("items");}
+            {search="";itemFilter="Owned";ImGui.OpenPopup("items");}
             AutoOpen(slot.Key,"items"); GearPicker(slot);
             if(eye)
             {

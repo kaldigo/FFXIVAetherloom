@@ -1,1 +1,1 @@
-Pair shields and secondary tools with individual main hands. Choose the preview weapon using the eye on its gear row. Design previews start with empty gear slots and retain the camera when switching weapons. Manual and assignment application select the pair for the current job.
+Open gear and accessory selection on the Owned filter by default. All and Missing remain available in the picker.
