@@ -57,9 +57,10 @@ internal sealed partial class WardrobeWindow
             if(!WardrobeApplication.PlanRestoration(previous,payload,currentGear,currentLook,manual,Equipped,fields,out var next,out var restoreLook,baseLook))
             {result="Waiting for equipped gear.";return false;}
             applyLook|=restoreLook;
-            // Once + Equipment, plus Customization when a wardrobe appearance field is enabled.
+            // Include Customization: Glamourer's RemoveCustomize also clears equipment display flags.
+            // BuildPlan clears Apply on every appearance field the design does not explicitly change.
             var response=plugin.GetIpcSubscriber<object,int,uint,ulong,int>("Glamourer.ApplyState")
-                .InvokeFunc(payload,player.ObjectIndex,0,applyLook?7UL:3UL);
+                .InvokeFunc(payload,player.ObjectIndex,0,7UL);
             if(response!=0)
             {
                 result=$"Glamourer could not apply the design (code {response}).";

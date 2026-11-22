@@ -1,1 +1,1 @@
-Refresh Mog Station and event ownership exemptions, including all five Alternative Dress Attire pieces. Check current store and acquisition sources every six hours and publish catalog changes automatically.
+Apply sheathed-arms, headgear, visor and ear visibility settings on designs with no appearance changes, including outfits without a main hand. Use the same fix for manual application and assignments.

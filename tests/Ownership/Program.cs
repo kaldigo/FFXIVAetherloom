@@ -57,6 +57,29 @@ foreach(bool bypass in new[]{false,true,false})
 }
 Console.WriteLine("Wardrobe application checks passed.");
 
+foreach(var field in new[]{"Weapon","Hat","Visor","VieraEars"})
+foreach(bool show in new[]{false,true})
+foreach(bool manual in new[]{false,true})
+{
+    string attribute=field=="Visor"?"IsToggled":"Show";
+    var currentGear=(JObject)playerGear.DeepClone();
+    currentGear[field]=new JObject{[attribute]=!show};
+    var design=new JObject{["Equipment"]=new JObject{[field]=new JObject{[attribute]=show,["Apply"]=true}},["Customize"]=new JObject()};
+    var payload=WardrobeApplication.BuildPlan(currentGear,playerLook,design,["MainHand","OffHand"],["Hairstyle"],null,_=>false,[],out var applyLook);
+    if(!WardrobeApplication.PlanRestoration(new JObject(),payload,currentGear,playerLook,manual,_=>null,["Hairstyle"],out var displayTracked,out _)
+        || payload["Equipment"]![field]!.Value<bool>(attribute)!=show || !payload["Equipment"]![field]!.Value<bool>("Apply")
+        || payload["Equipment"]!["MainHand"]!.Value<bool>("Apply") || applyLook
+        || ((JObject)payload["Customize"]!).Properties().Any(p=>p.Value is JObject entry && entry.Value<bool>("Apply"))
+        || displayTracked[field]!.Value<bool>("Applied")!=show)
+        throw new Exception("Display-only design changed equipment or appearance, or lost its display setting.");
+    var actualGear=(JObject)currentGear.DeepClone();
+    actualGear[field]=payload["Equipment"]![field]!.DeepClone();
+    var cleared=WardrobeApplication.BuildPlan(actualGear,playerLook,new JObject{["Equipment"]=new JObject(),["Customize"]=new JObject()},["MainHand","OffHand"],[],null,_=>false,[],out _);
+    if(!WardrobeApplication.PlanRestoration(displayTracked,cleared,actualGear,playerLook,false,_=>null,[],out _,out _)
+        || cleared["Equipment"]![field]!.Value<bool>(attribute)!=!show)
+        throw new Exception("Assignment fallback did not restore the display setting.");
+}
+
 var zoneDesign=Guid.NewGuid();
 var jobDesign=Guid.NewGuid();
 var otherJob=Guid.NewGuid();
