@@ -139,7 +139,7 @@ if(!WardrobeWearability.Allows(Mask(),1,0))throw new Exception("Compatible restr
 Console.WriteLine("Wardrobe wearability checks passed.");
 
 var chainRules=new JObject();
-string[] coast=["region:22","any"], limsa=["city:500",..coast], inn=["territory:177","inn",..limsa];
+string[] coast=["region:22","any"], limsa=["city:500","cities",..coast], inn=["territory:177","inn",..limsa];
 string[] warrior=["job:21","role:0","any"], paladin=["job:19","role:0","any"];
 Guid regional=Guid.NewGuid(), cityTank=Guid.NewGuid(),cityWar=Guid.NewGuid(),innOwner=Guid.NewGuid();
 void Demand(bool value,string why){if(!value)throw new Exception(why);}
@@ -155,6 +155,14 @@ WardrobeAssignment.Edit(chainRules,"inn|any",innOwner,null,false);
 Demand(WardrobeAssignment.Winner(chainRules,inn,warrior,Visible)?.Design==innOwner,"Inn rule wins");
 Demand(!WardrobeAssignment.Edit(chainRules,"inn|any",cityTank,null,false) && !WardrobeAssignment.Edit(chainRules,"inn|any",cityTank,cityWar,false),"Duplicate or stale move rejected");
 Demand(WardrobeAssignment.Edit(chainRules,"inn|any",cityTank,innOwner,false) && chainRules.Count==4,"Confirmed move replaces one owner");
+var allCities=Guid.NewGuid();
+Demand(WardrobeAssignment.Edit(chainRules,"cities|any",allCities,null,false),"Create all-cities assignment");
+Demand(!WardrobeAssignment.Edit(chainRules,"cities|any",regional,null,false),"Reject duplicate all-cities assignment");
+Demand(WardrobeAssignment.Winner(chainRules,["territory:178","inn","city:504","cities","region:24","any"],warrior,Visible)?.Design==cityTank,"Inn override wins above all cities");
+Demand(WardrobeAssignment.Winner(chainRules,["city:504","cities","region:24","any"],warrior,Visible)?.Design==allCities,"All cities matches a different city");
+Demand(WardrobeAssignment.Winner(chainRules,limsa,warrior,Visible)?.Design==cityWar,"Specific city wins above all cities");
+Demand(WardrobeAssignment.Previous(chainRules,limsa,warrior,"any",Visible)?.Design==allCities,"City editor shows all cities as its fallback");
+Demand(WardrobeAssignment.Winner(chainRules,coast,warrior,Visible)?.Design==regional,"Countryside retains its regional assignment");
 var aliases=JObject.Parse("""{"Jobs":{"021":"invalid","21":"00000000-0000-0000-0000-000000000001","0021":"00000000-0000-0000-0000-000000000002","bad":{}}}""");
 Demand(WardrobeAssignment.Rules(aliases).Count==1 && WardrobeAssignment.Rules(aliases).Count==1,"Malformed and duplicate legacy conditions migrate idempotently");
 var activeFields=JObject.Parse("""{"Body":3,"Head":3,"Hairstyle":{"Before":2,"Applied":5},"FacePaint":{"Before":4,"Applied":8}}""");

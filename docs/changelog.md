@@ -1,1 +1,1 @@
-Apply sheathed-arms, headgear, visor and ear visibility settings on designs with no appearance changes, including outfits without a main hand. Use the same fix for manual application and assignments.
+Add All cities under City or zone assignments. Match existing city area groups and their inns, including the Gold Saucer. Specific area and city assignments take priority, followed by All cities, region and Anywhere rules.

@@ -36,7 +36,7 @@ internal sealed class WardrobeLocations(ExcelSheet<ClassJob> jobSheet,ExcelSheet
         if(!lists.TryGetValue(type,out var keys))return [];
         // Labels are presentation data. Two different places may have the same localized name.
         return optionCache[type]=keys.GroupBy(k=>type=="Job" && k=="any"?"Any job":Name(k),StringComparer.OrdinalIgnoreCase).SelectMany(g=>g.Select(k=>(Key:k,Name:g.Count()>1?$"{g.Key} ({k})":g.Key)))
-            .OrderBy(x=>x.Key=="any"?0:1).ThenBy(x=>x.Name,StringComparer.CurrentCultureIgnoreCase).ToArray();
+            .OrderBy(x=>x.Key is "any" or "cities"?0:1).ThenBy(x=>x.Name,StringComparer.CurrentCultureIgnoreCase).ToArray();
     }
     private void Add(string type,string key,string name)
     {
@@ -49,6 +49,7 @@ internal sealed class WardrobeLocations(ExcelSheet<ClassJob> jobSheet,ExcelSheet
     {
         if(lists.Count>0)return;
         Add("Anywhere","any","Anywhere");Add("Job","any","Any job");
+        Add("City or zone","cities","All cities");
         foreach(var row in jobSheet.Where(j=>j.RowId>0))
         {
             var name=row.Name.ExtractText();
@@ -93,6 +94,7 @@ internal sealed class WardrobeLocations(ExcelSheet<ClassJob> jobSheet,ExcelSheet
                     var cityKey="city:"+t.PlaceNameZone.RowId;
                     Add("City or zone",cityKey,city);
                     chain.Add(cityKey);
+                    chain.Add("cities");
                 }
                 if(t.PlaceNameRegion.RowId!=0)
                 {
