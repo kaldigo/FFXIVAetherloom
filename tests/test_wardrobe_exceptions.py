@@ -5,9 +5,18 @@ import tempfile
 import unittest
 
 from tools.wardrobe_exceptions import generate
+from tools.refresh_wardrobe_exceptions import store_items
 
 
 class WardrobeExceptionTests(unittest.TestCase):
+    def test_collect_ids_are_mapped_to_game_items(self):
+        cabinet = [{'#': '1022', 'Item': '52414', 'Category': '10', 'Order': '50857'}]
+        collection = {'results': [dict(id=1023, name='Alternative Ruffled Dress',
+            category={'id': 10}, order=50857, sources=[dict(type='Premium', text='Online Store')])]}
+        self.assertEqual(store_items(cabinet, collection), {'52414': 'Alternative Ruffled Dress'})
+        with self.assertRaises(ValueError):
+            store_items([], collection)
+
     def test_normal_sources_win_and_conditional_reclaims_preserve_exemptions(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -39,12 +48,16 @@ class WardrobeExceptionTests(unittest.TestCase):
             }
             extracts = {i: dict(id=i, sources=s) for i, s in rows.items()}
             (root / 'extracts.json').write_text(json.dumps(extracts))
-            self.assertEqual(generate(root), [100, 102, 104])
+            self.assertEqual(generate(root, supplemental=[]), [100, 102, 104])
+            releases = [dict(items={'105': 'Normal vendor overlap', '107': 'New store release'})]
+            self.assertEqual(generate(root, supplemental=releases), [100, 102, 104, 107])
 
     def test_shipped_catalog_keeps_distinct_event_and_gameplay_items(self):
         catalog = Path(__file__).resolve().parents[1] / 'Aetherloom/WardrobeExceptions.json'
         items = json.loads(catalog.read_text())
         self.assertIn(13331, items)  # Maiden's Rhapsody
         self.assertIn(6976, items)   # Valentione gear, also sold on the store
+        for item in range(52413, 52418):  # Alternative Dress Attire
+            self.assertIn(item, items)
         self.assertNotIn(16068, items)  # GARO weapon available with Wolf Marks
         self.assertNotIn(45057, items)  # Figmental weapon from treasure content

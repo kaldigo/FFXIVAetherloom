@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 
-def generate(directory):
+def generate(directory, supplemental=None):
     def rows(name):
         with (directory / (name + '.csv')).open(encoding='utf-8-sig', newline='') as file:
             yield from csv.DictReader(file)
@@ -24,6 +24,11 @@ def generate(directory):
     shops = {int(r['#']) for r in rows('SpecialShop') if int(r['RequiredFestival']) or int(r['Quest']) in quests}
     extracts = json.loads((directory / 'extracts.json').read_text(encoding='utf-8'))
     candidates = set(seasonal)
+    # Store releases can precede Teamcraft's acquisition extract updates.
+    if supplemental is None:
+        supplemental = json.loads(Path(__file__).with_name('wardrobe_store_releases.json').read_text(encoding='utf-8'))
+    for release in supplemental:
+        candidates.update(int(item) for item in release['items'])
     normal = set()
     exchanges = {}
     for row in extracts.values():

@@ -1,0 +1,39 @@
+name: Refresh wardrobe exemptions
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: wardrobe-catalog-refresh
+  cancel-in-progress: false
+jobs:
+  refresh:
+    if: github.repository == 'kaldigo/FFXIVAetherloom'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Refresh and validate acquisition data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -m tools.refresh_wardrobe_exceptions
+          python -m unittest discover -s tests
+      - name: Publish changed catalog through the release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- Aetherloom/WardrobeExceptions.json; then exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          printf '%s\n' 'Refresh Mog Station and event exemptions from current acquisition sources.' > docs/changelog.md
+          git add Aetherloom/WardrobeExceptions.json docs/changelog.md
+          git commit -m 'Refresh wardrobe acquisition exemptions'
+          git push origin HEAD:main
+          gh workflow run release-fork.yml --ref main -f source_commit="$(git rev-parse HEAD)"

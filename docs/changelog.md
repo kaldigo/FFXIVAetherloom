@@ -1,1 +1,1 @@
-Open gear and accessory selection on the Owned filter by default. All and Missing remain available in the picker.
+Refresh Mog Station and event ownership exemptions, including all five Alternative Dress Attire pieces. Check current store and acquisition sources every six hours and publish catalog changes automatically.
