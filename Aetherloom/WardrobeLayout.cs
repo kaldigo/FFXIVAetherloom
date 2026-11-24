@@ -65,6 +65,7 @@ internal interface IWardrobe
     bool AssignmentMode {get;set;}
     IEnumerable<(string Key,string Name)> RuleOptions(string type);
     IEnumerable<string> DesignRules {get;}
+    IEnumerable<string> DesignAssignments(Guid id)=>id==Selected?DesignRules:[];
     string RuleLabel(string key);
     Guid? RuleOwner(string key);
     string RuleNote(string key);
@@ -289,6 +290,16 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
             {
                 if(WorkspaceControls.TreeRow(item.Id.ToString(),item.Name,item.Id==wardrobe.Selected,false))
                 {wardrobe.Select(item.Id);folder=parent;}
+                var assigned=wardrobe.DesignAssignments(item.Id).ToArray();
+                if(assigned.Length>0)
+                {
+                    var marker=ImGui.GetItemRectMin()+new Vector2(24,20)*S;
+                    var draw=ImGui.GetWindowDrawList();
+                    draw.AddCircleFilled(marker,4.5f*S,0xff24201b);
+                    draw.AddCircleFilled(marker,3*S,0xffc7db65);
+                    if(ImGui.IsItemHovered())
+                        ImGui.SetTooltip(item.Name+"\nAssigned\n"+string.Join("\n",assigned.Select(wardrobe.RuleLabel)));
+                }
                 if(ImGui.IsItemClicked(ImGuiMouseButton.Right))
                 {
                     contextDesign=item.Id;folderName=item.Name;contextPosition=ImGui.GetMousePos();

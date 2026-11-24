@@ -1,1 +1,1 @@
-Filter main-hand selection by class or job. Search the class selector by name or abbreviation and combine it with item search and Owned, All or Missing. Only classes eligible for the selected weapon row are listed.
+Mark sidebar designs with a teal dot when they have assignments for the current character. Hover a marked design to see its assignment locations and jobs. The marker also appears in Manual mode.

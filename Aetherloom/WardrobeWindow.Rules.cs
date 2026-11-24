@@ -30,7 +30,10 @@ internal sealed partial class WardrobeWindow
         return options.Concat(savedAreas.Select(k=>(Key:k,Name:locations.Name(k)))).DistinctBy(o=>o.Key);
     }
     public Guid? RuleOwner(string key)=>WardrobeAssignment.Owner(Rules,key);
-    public IEnumerable<string> DesignRules=>Rules.Properties().Where(p=>RuleOwner(p.Name)==Selected).Select(p=>p.Name);
+    public IEnumerable<string> DesignRules=>DesignAssignments(Selected);
+    public IEnumerable<string> DesignAssignments(Guid id)=>HasCharacter
+        ?Rules.Properties().Where(p=>Guid.TryParse(p.Value.ToString(),out var owner) && owner==id).Select(p=>p.Name)
+        :[];
     public string RuleLabel(string key)
     {
         var parts=key.Split('|');
