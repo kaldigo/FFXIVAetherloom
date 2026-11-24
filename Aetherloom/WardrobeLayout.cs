@@ -26,6 +26,7 @@ internal interface IWardrobe
     bool Wearable(Guid id);
     IEnumerable<WardrobeSlot> Slots(bool accessories);
     IEnumerable<WardrobeItem> Catalog(string slot);
+    IEnumerable<(string Key,string Name)> WeaponJobs=>WardrobeMetadata.JobAliases.Select(p=>(p.Value,p.Key));
     object OwnershipSnapshot {get;}
     IEnumerable<WardrobeDye> Dyes { get; }
     IEnumerable<WardrobeStyle> Styles(string key);
@@ -89,6 +90,8 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
     internal string Tab="Gear";
     internal string? OpenPicker;
     private string itemFilter="Owned";
+    private string gearJob="",gearJobSearch="";
+    private (string Key,string Name)[] gearJobs=[];
     private int family;
     private WardrobeItem[] gearResults=[];
     private object? resultOwnership;
@@ -565,10 +568,38 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         float popupHeight=Math.Min(600,ImGui.GetWindowViewport().WorkSize.Y/S);
         if(!WorkspaceControls.BeginPicker("items",390,popupHeight))return;
         bool reset=ImGui.IsWindowAppearing();
+        bool mainHand=slot.Key.StartsWith("MainHand");
+        if(reset && mainHand)
+        {
+            gearJob="";
+            var available=wardrobe.Catalog(slot.Key).SelectMany(i=>i.Jobs.Split([' ',',','/'],StringSplitOptions.RemoveEmptyEntries)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            gearJobs=wardrobe.WeaponJobs.Where(j=>available.Contains(j.Key)).DistinctBy(j=>j.Key)
+                .OrderBy(j=>j.Name,StringComparer.CurrentCultureIgnoreCase).ToArray();
+        }
         WorkspaceControls.PickerHeading("Select "+slot.Label.ToLowerInvariant()+" gear");
         ImGui.TextDisabled(wardrobe.Title);
         ImGui.SetNextItemWidth(-1);
         reset|=ImGui.InputTextWithHint("##search","Search "+slot.Label.ToLowerInvariant()+" gear",ref search,100);
+        if(mainHand)
+        {
+            var selected=gearJobs.FirstOrDefault(j=>j.Key==gearJob);
+            var caption=gearJob.Length==0?"All classes / jobs":selected.Name+" ("+selected.Key+")";
+            if(ImGui.Button(caption+"###gear-job",new Vector2(-1,0))){gearJobSearch="";ImGui.OpenPopup("gear-jobs");}
+            if(WorkspaceControls.BeginPicker("gear-jobs",300,330))
+            {
+                WorkspaceControls.PickerHeading("Class / job");
+                ImGui.SetNextItemWidth(-1);
+                ImGui.InputTextWithHint("##job-search","Name or abbreviation",ref gearJobSearch,80);
+                string? picked=null;
+                if(ImGui.Selectable("All classes / jobs",gearJob.Length==0))picked="";
+                if(ImGui.BeginChild("job-results",new Vector2(-1,230*S)))
+                    foreach(var job in gearJobs.Where(j=>j.Name.Contains(gearJobSearch,StringComparison.OrdinalIgnoreCase) || j.Key.Contains(gearJobSearch,StringComparison.OrdinalIgnoreCase)))
+                        if(ImGui.Selectable(job.Name+" ("+job.Key+")###"+job.Key,gearJob==job.Key))picked=job.Key;
+                ImGui.EndChild();
+                if(picked!=null){gearJob=picked;reset=true;ImGui.CloseCurrentPopup();}
+                WorkspaceControls.EndPicker();
+            }
+        }
         float segment=(ImGui.GetContentRegionAvail().X-2*ImGui.GetStyle().ItemSpacing.X)/3;
         foreach(var mode in new[]{"All","Owned","Missing"})
         {
@@ -583,6 +614,8 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         if(reset || (itemFilter!="All" && !ReferenceEquals(ownership,resultOwnership)))
         {
             var catalog=wardrobe.Catalog(slot.Key).Where(i=>i.Name.Contains(search,StringComparison.OrdinalIgnoreCase));
+            if(mainHand && gearJob.Length>0)
+                catalog=catalog.Where(i=>i.Jobs.Split([' ',',','/'],StringSplitOptions.RemoveEmptyEntries).Contains(gearJob,StringComparer.OrdinalIgnoreCase));
             gearResults=itemFilter switch
             {
                 "Missing"=>catalog.Where(i=>wardrobe.Availability(i.Id)=="Missing").ToArray(),
@@ -593,7 +626,7 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         }
         // Give the scrollbar the full catalogue height, but only request icons for visible tiles.
         float stride=52*S+ImGui.GetStyle().ItemSpacing.Y;
-        float height=Math.Min(Math.Max(60,popupHeight-183)*S,Math.Max(1,gearResults.Length)*stride);
+        float height=Math.Min(Math.Max(60*S,(popupHeight-183)*S-(mainHand?ImGui.GetFrameHeightWithSpacing():0)),Math.Max(1,gearResults.Length)*stride);
         ImGui.SetNextWindowContentSize(new Vector2(0,gearResults.Length*stride));
         uint? chosen=null;
         if(ImGui.BeginChild("results",new Vector2(-1,height),false))

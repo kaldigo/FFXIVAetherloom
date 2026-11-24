@@ -1,1 +1,1 @@
-Add All cities under City or zone assignments. Match existing city area groups and their inns, including the Gold Saucer. Specific area and city assignments take priority, followed by All cities, region and Anywhere rules.
+Filter main-hand selection by class or job. Search the class selector by name or abbreviation and combine it with item search and Owned, All or Missing. Only classes eligible for the selected weapon row are listed.

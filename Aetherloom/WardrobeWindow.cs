@@ -383,6 +383,9 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         return WardrobeWeapons.OffHand(plan,key,main,item.ItemUICategory.RowId,item.ModelSub!=0);
     }
     public object OwnershipSnapshot=>ownership.Snapshot;
+    public IEnumerable<(string Key,string Name)> WeaponJobs=>data.GetExcelSheet<ClassJob>(Dalamud.Game.ClientLanguage.English)
+        .Where(j=>j.RowId>0 && j.Abbreviation.ExtractText().Length>0)
+        .Select(j=>(j.Abbreviation.ExtractText(),j.Name.ExtractText()));
     public IEnumerable<WardrobeItem> Catalog(string key)
     {
         var slot=key.Split('/')[0];
