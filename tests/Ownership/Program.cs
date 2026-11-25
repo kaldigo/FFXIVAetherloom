@@ -163,6 +163,15 @@ Demand(WardrobeAssignment.Winner(chainRules,["city:504","cities","region:24","an
 Demand(WardrobeAssignment.Winner(chainRules,limsa,warrior,Visible)?.Design==cityWar,"Specific city wins above all cities");
 Demand(WardrobeAssignment.Previous(chainRules,limsa,warrior,"any",Visible)?.Design==allCities,"City editor shows all cities as its fallback");
 Demand(WardrobeAssignment.Winner(chainRules,coast,warrior,Visible)?.Design==regional,"Countryside retains its regional assignment");
+var batchRules=new JObject{["cities|job:21"]=cityWar.ToString()};
+var batchOriginal=batchRules.DeepClone();
+var requested=new Dictionary<string,Guid?>{["cities|job:19"]=null,["cities|job:21"]=null};
+Demand(!WardrobeAssignment.EditMany(batchRules,regional,requested) && JToken.DeepEquals(batchRules,batchOriginal),"Conflicting batch must not partially save");
+requested["cities|job:21"]=cityWar;
+Demand(WardrobeAssignment.EditMany(batchRules,regional,requested) && batchRules.Count==2
+    && batchRules.Properties().All(p=>p.Value.ToString()==regional.ToString()),"Confirmed batch adds and moves all assignments");
+var retry=requested.Keys.ToDictionary(key=>key,_=>(Guid?)regional);
+Demand(WardrobeAssignment.EditMany(batchRules,regional,retry) && batchRules.Count==2,"Repeated batch does not duplicate assignments");
 var aliases=JObject.Parse("""{"Jobs":{"021":"invalid","21":"00000000-0000-0000-0000-000000000001","0021":"00000000-0000-0000-0000-000000000002","bad":{}}}""");
 Demand(WardrobeAssignment.Rules(aliases).Count==1 && WardrobeAssignment.Rules(aliases).Count==1,"Malformed and duplicate legacy conditions migrate idempotently");
 var activeFields=JObject.Parse("""{"Body":3,"Head":3,"Hairstyle":{"Before":2,"Applied":5},"FacePaint":{"Before":4,"Applied":8}}""");

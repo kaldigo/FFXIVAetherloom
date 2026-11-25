@@ -70,6 +70,7 @@ internal interface IWardrobe
     Guid? RuleOwner(string key);
     string RuleNote(string key);
     bool SaveRule(string key,Guid? expected,bool remove);
+    bool SaveRules(IReadOnlyDictionary<string,Guid?> expected)=>false;
     bool HasCharacter {get;}
     bool BypassOwnership {get;set;}
     void ApplyToCharacter();
@@ -693,6 +694,7 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
     private string locationType="", rulePlace="", ruleJob="any";
     private readonly HashSet<string> extraPlaces=[], extraJobs=[];
     private (Guid Design,string Key,Guid Owner)? moveRequest;
+    private (Guid Design,Dictionary<string,Guid?> Owners)? batchRequest;
     private void ClearAssignmentDraft()
     {
         locationType=rulePlace=assignmentSearch="";
@@ -700,6 +702,7 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         extraPlaces.Clear();
         extraJobs.Clear();
         moveRequest=null;
+        batchRequest=null;
     }
     private void DrawAssignments()
     {
@@ -721,6 +724,45 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         var places=extraPlaces.Prepend(rulePlace).Distinct().ToArray();
         var jobs=extraJobs.Prepend(ruleJob).Distinct().ToArray();
         bool multiple=places.Length*jobs.Length>1;
+        if(multiple)
+        {
+            var owners=places.SelectMany(place=>jobs.Select(job=>place+"|"+job)).ToDictionary(key=>key,wardrobe.RuleOwner);
+            int count=owners.Count(p=>p.Value!=wardrobe.Selected);
+            ImGui.BeginDisabled(count==0);
+            bool addAll=ImGui.Button($"Add all assignments ({count})");
+            ImGui.EndDisabled();
+            if(addAll)
+            {
+                if(owners.Any(p=>p.Value.HasValue && p.Value!=wardrobe.Selected))
+                {
+                    batchRequest=(wardrobe.Selected,owners);
+                    ImGui.OpenPopup("add-all-rules");
+                }
+                else if(wardrobe.SaveRules(owners)){ClearAssignmentDraft();return;}
+            }
+            bool saved=false;
+            if(WorkspaceControls.BeginPicker("add-all-rules",390,340))
+            {
+                WorkspaceControls.PickerHeading("Add all assignments");
+                if(batchRequest is {} request && request.Design==wardrobe.Selected)
+                {
+                    ImGui.TextWrapped("These assignments will move to "+wardrobe.Title+".");
+                    if(ImGui.BeginChild("conflicts",new Vector2(-1,170*S)))
+                        foreach(var entry in request.Owners.Where(p=>p.Value.HasValue && p.Value!=request.Design))
+                        {
+                            var name=wardrobe.Designs.FirstOrDefault(d=>d.Id==entry.Value)?.Name??"another design";
+                            ImGui.TextWrapped(wardrobe.RuleLabel(entry.Key)+" — "+name);
+                        }
+                    ImGui.EndChild();
+                    if(ImGui.Button("Add all and move conflicts"))
+                    {saved=wardrobe.SaveRules(request.Owners);if(saved)ImGui.CloseCurrentPopup();}
+                    ImGui.SameLine();
+                    if(ImGui.Button("Cancel")){batchRequest=null;ImGui.CloseCurrentPopup();}
+                }
+                WorkspaceControls.EndPicker();
+            }
+            if(saved){ClearAssignmentDraft();return;}
+        }
         foreach(var place in places)
         foreach(var job in jobs)
         {

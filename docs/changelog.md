@@ -1,1 +1,1 @@
-Mark sidebar designs with a teal dot when they have assignments for the current character. Hover a marked design to see its assignment locations and jobs. The marker also appears in Manual mode.
+Add all selected assignment combinations in one action. Confirm conflicting design assignments together, save the batch atomically, and clear the selection after success.

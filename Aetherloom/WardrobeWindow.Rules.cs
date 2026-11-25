@@ -66,6 +66,18 @@ internal sealed partial class WardrobeWindow
         if(!HasCharacter || !library.ContainsKey(Selected) || !WardrobeAssignment.Edit(Rules,key,Selected,expected,remove))return false;
         assignedJobTerms=null;Write();return true;
     }
+    public bool SaveRules(IReadOnlyDictionary<string,Guid?> expected)
+    {
+        if(!HasCharacter || !library.ContainsKey(Selected))return false;
+        var character=ownership.Character.ToString();
+        return EditLibrary(doc=>
+        {
+            var bindings=(JObject)(doc["Assignments"]??=new JObject());
+            var settings=(JObject)(bindings[character]??=new JObject());
+            if(!WardrobeAssignment.EditMany(WardrobeAssignment.Rules(settings),Selected,expected))
+                throw new System.IO.InvalidDataException("An assignment changed. Review the selections and try again.");
+        });
+    }
     internal bool TryAssignment(uint job,uint territory,uint map,out WardrobeAssignment assignment)
     {
         assignment=default;

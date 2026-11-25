@@ -53,6 +53,13 @@ internal readonly record struct WardrobeAssignment(ulong Character,uint Job,uint
         return rules;
     }
 
+    internal static bool EditMany(JObject rules,Guid design,IReadOnlyDictionary<string,Guid?> expected)
+    {
+        if(expected.Any(entry=>Owner(rules,entry.Key)!=entry.Value))return false;
+        foreach(var key in expected.Keys)rules[key]=design.ToString();
+        return true;
+    }
+
     internal static WardrobeAssignment? Resolve(JObject? bindings,ulong character,uint job,uint zone,Func<Guid,bool> visible,
         IEnumerable<string>? places=null,IEnumerable<string>? jobs=null)
     {
