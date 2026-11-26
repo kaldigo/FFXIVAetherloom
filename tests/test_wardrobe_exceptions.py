@@ -45,18 +45,24 @@ class WardrobeExceptionTests(unittest.TestCase):
                 104: [store, source(3, [dict(npcId=1017613, festival=0)])],
                 105: [store, source(3, [dict(npcId=123, festival=0)])],
                 106: [source(1, [1])],
+                108: [source(13, [102])],  # Store-only bundle contents
+                109: [store, source(13, [102, 106])],  # Also in a gameplay coffer
+                110: [source(13, [108])],  # Nested bundle
+                111: [store, source(13, [999])],  # Unknown container requires ownership
             }
             extracts = {i: dict(id=i, sources=s) for i, s in rows.items()}
             (root / 'extracts.json').write_text(json.dumps(extracts))
-            self.assertEqual(generate(root, supplemental=[]), [100, 102, 104])
+            self.assertEqual(generate(root, supplemental=[]), [100, 102, 104, 108, 110])
             releases = [dict(items={'105': 'Normal vendor overlap', '107': 'New store release'})]
-            self.assertEqual(generate(root, supplemental=releases), [100, 102, 104, 107])
+            self.assertEqual(generate(root, supplemental=releases), [100, 102, 104, 107, 108, 110])
 
     def test_shipped_catalog_keeps_distinct_event_and_gameplay_items(self):
         catalog = Path(__file__).resolve().parents[1] / 'Aetherloom/WardrobeExceptions.json'
         items = json.loads(catalog.read_text())
         self.assertIn(13331, items)  # Maiden's Rhapsody
         self.assertIn(6976, items)   # Valentione gear, also sold on the store
+        for item in [36335, *range(20628, 20633)]:  # Blackbosom store bundle weapons
+            self.assertIn(item, items)
         for item in range(52413, 52418):  # Alternative Dress Attire
             self.assertIn(item, items)
         self.assertNotIn(16068, items)  # GARO weapon available with Wolf Marks

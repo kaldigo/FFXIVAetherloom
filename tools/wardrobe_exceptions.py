@@ -31,12 +31,16 @@ def generate(directory, supplemental=None):
         candidates.update(int(item) for item in release['items'])
     normal = set()
     exchanges = {}
+    containers = {}
     for row in extracts.values():
         item = row['id']
         for source in row['sources']:
             kind, data = source['type'], source['data']
             if kind == 21:  # Mog Station
                 candidates.add(item)
+            elif kind == 13:  # Contents of coffers / store bundles
+                containers.setdefault(item, set()).update(data)
+                exchanges.setdefault(item, []).extend({container} for container in data)
             elif kind in (18, 19):  # quest / achievement rewards
                 events = quests if kind == 18 else achievements
                 if any(i in events for i in data):
@@ -62,6 +66,12 @@ def generate(directory, supplemental=None):
             elif kind not in (-1, 0, 11, 12, 20):
                 normal.add(item)
 
+    # Include contents even when only the bundle has a store acquisition record.
+    while True:
+        expanded = candidates | {item for item, parents in containers.items() if parents & candidates}
+        if expanded == candidates:
+            break
+        candidates = expanded
     allowed = candidates - normal
     while True:
         # A conversion is a normal acquisition route if all inputs are obtainable normally.
