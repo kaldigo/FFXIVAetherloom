@@ -1,1 +1,1 @@
-Fix store-bundle ownership exemptions, including Blackbosom Void Reaper and the other Blackbosom scythes. Items also obtainable through normal gameplay still require ownership.
+Simplify assignments into Anywhere, Region, Hub, Zone, Inn and Housing. Add field-operation zones, district-wide housing and personal/FC property groups with the new priority order. Migrate equivalent rules without duplicates; retain removed or conflicting assignments for review and back up the original wardrobe file.

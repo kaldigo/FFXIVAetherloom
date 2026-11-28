@@ -174,6 +174,41 @@ var retry=requested.Keys.ToDictionary(key=>key,_=>(Guid?)regional);
 Demand(WardrobeAssignment.EditMany(batchRules,regional,retry) && batchRules.Count==2,"Repeated batch does not duplicate assignments");
 var aliases=JObject.Parse("""{"Jobs":{"021":"invalid","21":"00000000-0000-0000-0000-000000000001","0021":"00000000-0000-0000-0000-000000000002","bad":{}}}""");
 Demand(WardrobeAssignment.Rules(aliases).Count==1 && WardrobeAssignment.Rules(aliases).Count==1,"Malformed and duplicate legacy conditions migrate idempotently");
+// Location simplification preserves owners and archives ambiguous/removed conditions.
+var simplified=new JObject{["100"]=new JObject{["Rules"]=new JObject{
+    ["city:500|any"]=cityWar.ToString(),["territory:128|any"]=cityWar.ToString(),
+    ["territory:129|any"]=regional.ToString(),["area:128:5|any"]=regional.ToString(),
+    ["territory:282|job:21"]=cityWar.ToString(),["personal|any"]=cityTank.ToString(),
+    ["territory:135|any"]=regional.ToString()}}};
+string? CanonicalPlace(string place)=>place switch {
+    "territory:128" or "territory:129"=>"city:500",
+    "area:128:5" or "territory:282"=>null,
+    _=>place};
+Demand(WardrobeLocationPolicy.Migrate(simplified,CanonicalPlace),"Location migration runs once");
+var simplifiedSettings=(JObject)simplified["100"]!;
+var simplifiedRules=(JObject)simplifiedSettings["Rules"]!;
+Demand(simplifiedRules.Count==3 && WardrobeAssignment.Owner(simplifiedRules,"city:500|any")==cityWar,"Canonical rule wins; same-owner aliases deduplicate");
+Demand(simplifiedSettings["ReviewRules"] is JObject {Count:3},"Conflicts, removed areas and house sizes remain available for review");
+Demand(simplifiedSettings["ReviewRules"]?["territory:129|any"]?["Design"]?.ToString()==regional.ToString(),"Conflicting owner is retained");
+var migratedSnapshot=simplified.DeepClone();
+Demand(!WardrobeLocationPolicy.Migrate(simplified,CanonicalPlace) && JToken.DeepEquals(simplified,migratedSnapshot),"Migration is idempotent including review entries");
+foreach(var property in new[]{"personal","apartment","fc","chambers"})
+{
+    var propertyChain=WardrobeLocationPolicy.PropertyChain(property);
+    Demand(propertyChain[0]==property && propertyChain[^1]=="properties","Specific property precedes its umbrellas");
+    Demand(propertyChain[1]==(property is "personal" or "apartment"?"mine":"fc-properties"),"Personal and FC properties remain separate");
+}
+Demand(WardrobeLocationPolicy.FieldOperation(41) && WardrobeLocationPolicy.FieldOperation(48) && WardrobeLocationPolicy.FieldOperation(61)
+    && !WardrobeLocationPolicy.FieldOperation(3),"Eureka, Bozja and new field operations are included without dungeons");
+var housingPriorities=new[]{"personal","mine","properties","inside","territory:339","housing","region:22","any"};
+var priorityRules=new JObject();
+for(int i=housingPriorities.Length-1;i>=0;i--)
+{
+    priorityRules[housingPriorities[i]+"|any"]=Guid.NewGuid().ToString();
+    Demand(WardrobeAssignment.Winner(priorityRules,housingPriorities,warrior,Visible)?.Key==housingPriorities[i]+"|any","Each housing specificity level wins over its parents");
+}
+Console.WriteLine("Simplified location migration and housing priorities passed.");
+
 var activeFields=JObject.Parse("""{"Body":3,"Head":3,"Hairstyle":{"Before":2,"Applied":5},"FacePaint":{"Before":4,"Applied":8}}""");
 var visibleLook=JObject.Parse("""{"Hairstyle":{"Value":5},"FacePaint":{"Value":9},"Race":{"Value":8}}""");
 var transition=JObject.Parse("""{"Equipment":{"Body":{"Apply":true,"ApplyStain":true,"ItemId":30}},"Customize":{}}""");

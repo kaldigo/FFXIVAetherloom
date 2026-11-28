@@ -21,13 +21,15 @@ internal sealed partial class WardrobeWindow
         set {if(value==AssignmentMode)return;saved["AssignmentMode"]=value;ModeRevision++;Write();}
     }
     internal int ModeRevision {get;private set;}
-    public IEnumerable<(string Key,string Name)> RuleOptions(string type)
+    public IEnumerable<(string Key,string Name)> RuleOptions(string type)=>locations.Options(type);
+    public IEnumerable<(string Key,string Reason)> ReviewRules=>CharacterSettings["ReviewRules"] is JObject review
+        ?review.Properties().Where(p=>Guid.TryParse(p.Value["Design"]?.ToString(),out var id) && id==Selected)
+            .Select(p=>(p.Name,p.Value.Value<string>("Reason")??"Choose a replacement location."))
+        :[];
+    public void DismissReview(string key)
     {
-        var options=locations.Options(type);
-        if(type!="Named area")return options;
-        // Keep previously assigned walk-in areas selectable after a relog elsewhere.
-        var savedAreas=Rules.Properties().Select(p=>p.Name.Split('|')[0]).Where(k=>k.StartsWith("area:")).Distinct();
-        return options.Concat(savedAreas.Select(k=>(Key:k,Name:locations.Name(k)))).DistinctBy(o=>o.Key);
+        if(CharacterSettings["ReviewRules"] is JObject review && Guid.TryParse(review[key]?["Design"]?.ToString(),out var id) && id==Selected)
+        {review.Remove(key);Write();}
     }
     public Guid? RuleOwner(string key)=>WardrobeAssignment.Owner(Rules,key);
     public IEnumerable<string> DesignRules=>DesignAssignments(Selected);

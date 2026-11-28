@@ -71,6 +71,8 @@ internal interface IWardrobe
     string RuleNote(string key);
     bool SaveRule(string key,Guid? expected,bool remove);
     bool SaveRules(IReadOnlyDictionary<string,Guid?> expected)=>false;
+    IEnumerable<(string Key,string Reason)> ReviewRules=>[];
+    void DismissReview(string key){}
     bool HasCharacter {get;}
     bool BypassOwnership {get;set;}
     void ApplyToCharacter();
@@ -707,6 +709,14 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
     private void DrawAssignments()
     {
         if(!wardrobe.HasCharacter){ImGui.TextUnformatted("Log in to manage assignments.");return;}
+        foreach(var review in wardrobe.ReviewRules.ToArray())
+        {
+            ImGui.PushID("review-"+review.Key);
+            ImGui.TextWrapped("Needs review (inactive): "+wardrobe.RuleLabel(review.Key));
+            ImGui.TextWrapped(review.Reason);
+            if(ImGui.Button("Dismiss old assignment"))wardrobe.DismissReview(review.Key);
+            ImGui.PopID();ImGui.Spacing();
+        }
         foreach(var key in wardrobe.DesignRules.ToArray())
         {
             ImGui.PushID(key);ImGui.AlignTextToFramePadding();ImGui.TextUnformatted(wardrobe.RuleLabel(key));ImGui.SameLine();
@@ -715,7 +725,7 @@ internal sealed partial class WardrobeLayout(IWardrobe wardrobe)
         }
         ImGui.Spacing();
         var previousType=locationType;
-        Select("Location type",ref locationType,new[]{"Anywhere","Region","City or zone","Named area","Inn","Housing"}.Select(t=>(t,t)));
+        Select("Location type",ref locationType,new[]{"Anywhere","Region","Hub","Zone","Inn","Housing"}.Select(t=>(t,t)));
         if(previousType!=locationType){rulePlace=locationType=="Anywhere"?"any":"";extraPlaces.Clear();}
         if(locationType.Length==0)return;
         if(locationType!="Anywhere")Select("Location",ref rulePlace,wardrobe.RuleOptions(locationType),extraPlaces);

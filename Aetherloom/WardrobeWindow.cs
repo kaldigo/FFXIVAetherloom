@@ -63,7 +63,14 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         if(saved["FavouriteDesigns"] is JArray starred)
             foreach(var token in starred)if(Guid.TryParse(token.ToString(),out var id))favourites.Add(id);
         layout=new(this);
-        if(LocalReady)IndexLocal();
+        if(LocalReady)
+        {
+            var candidate=(JObject)saved.DeepClone();
+            try {if(PrepareLocationAssignments(candidate)){Persist(candidate);saved=candidate;}}
+            catch(Exception ex) when(ex is IOException or UnauthorizedAccessException)
+            {saved=candidate;Message="Assignment migration is active but could not be saved: "+ex.Message;}
+            IndexLocal();
+        }
     }
     public override void PreDraw()=>WindowShell.PushHostStyle();
     public override void PostDraw()=>WindowShell.PopHostStyle();
@@ -170,8 +177,15 @@ internal sealed partial class WardrobeWindow : Window, IWardrobe
         saved["Plans"]=Plans;saved["Assignments"]=assignments;
         return saved;
     }
+    private bool PrepareLocationAssignments(JObject document)
+    {
+        if(document["Assignments"] is not JObject bindings || !WardrobeLocationPolicy.Migrate(bindings,locations.Canonical))return false;
+        if(File.Exists(file) && !File.Exists(file+".pre-locations-v2.bak"))File.Copy(file,file+".pre-locations-v2.bak");
+        return true;
+    }
     private void Persist(JObject document)
     {
+        PrepareLocationAssignments(document);
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         File.WriteAllText(file+".tmp",document.ToString());File.Move(file+".tmp",file,true);
     }

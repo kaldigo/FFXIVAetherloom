@@ -10,13 +10,14 @@ namespace Aetherloom;
 internal sealed class WardrobeLocations(ExcelSheet<ClassJob> jobSheet,ExcelSheet<TerritoryType> territories,ExcelSheet<GameMap> maps,ExcelSheet<PlaceName> names)
 {
     internal WardrobeLocations(IDataManager data):this(data.GetExcelSheet<ClassJob>(),data.GetExcelSheet<TerritoryType>(),data.GetExcelSheet<GameMap>(),data.GetExcelSheet<PlaceName>()){}
-    private readonly Dictionary<string,string> labels=new(){["any"]="Anywhere",["inn"]="Any inn",["district"]="Any housing district",["inside"]="Any residential interior",["personal"]="My house",["fc"]="My FC house",["apartment"]="My apartment",["chambers"]="My FC room"};
+    private readonly Dictionary<string,string> labels=new(){["any"]="Anywhere",["inn"]="All inns",["district"]="Residential districts",["inside"]="All interiors",["personal"]="My house",["fc"]="My FC estate",["apartment"]="My apartment",["chambers"]="My private chambers",["housing"]="All housing",["properties"]="My and FC properties",["mine"]="My properties",["fc-properties"]="My FC properties"};
     private readonly Dictionary<string,HashSet<string>> lists=[];
     private readonly Dictionary<string,string[]> chains=[];
     private readonly Dictionary<uint,string[]> jobs=[];
     internal int Revision {get;private set;}
     private readonly Dictionary<string,(string Key,string Name)[]> optionCache=[];
     private readonly Dictionary<uint,string> cityNames=[];
+    private readonly Dictionary<string,string> aliases=[];
     private static readonly string[] RoleNames=["Tanks","Melee DPS","Ranged DPS","Healers","Caster DPS","Crafters","Gatherers"];
 
     internal string[] JobChain(uint id){Ensure();return jobs.GetValueOrDefault(id)??["job:"+id,"any"];}
@@ -26,6 +27,7 @@ internal sealed class WardrobeLocations(ExcelSheet<ClassJob> jobSheet,ExcelSheet
         if(labels.TryGetValue(key,out var name))return name;
         var parts=key.Split(':');
         if(parts is ["area",_,var raw] && uint.TryParse(raw,out var id) && names.TryGetRow(id,out var row))return row.Name.ExtractText();
+        if(parts is ["map",var m] && uint.TryParse(m,out var mid) && maps.TryGetRow(mid,out var mr))return mr.PlaceNameSub.Value.Name.ExtractText();
         if(parts is ["territory",var t] && uint.TryParse(t,out var zone) && territories.TryGetRow(zone,out var territory))return territory.PlaceName.Value.Name.ExtractText();
         return key;
     }
@@ -49,7 +51,7 @@ internal sealed class WardrobeLocations(ExcelSheet<ClassJob> jobSheet,ExcelSheet
     {
         if(lists.Count>0)return;
         Add("Anywhere","any","Anywhere");Add("Job","any","Any job");
-        Add("City or zone","cities","All cities");
+        Add("Hub","cities","All hubs");
         foreach(var row in jobSheet.Where(j=>j.RowId>0))
         {
             var name=row.Name.ExtractText();
@@ -62,72 +64,77 @@ internal sealed class WardrobeLocations(ExcelSheet<ClassJob> jobSheet,ExcelSheet
             jobs[row.RowId]=role>=0?[key,"role:"+role,"any"]:[key,"any"];
         }
         var sheet=territories;
-        foreach(var t in sheet.Where(t=>t.TerritoryIntendedUse.RowId==0 && t.PlaceNameZone.RowId>0))
-            cityNames.TryAdd(t.PlaceNameZone.RowId,t.PlaceNameZone.Value.Name.ExtractText());
-        // The public Saucer and Chocobo Square share a zone ID; its localized map caption is the city label.
+        var districts=sheet.Where(t=>t.IsInUse && t.TerritoryIntendedUse.RowId==13 && t.PlaceName.RowId!=0).ToArray();
+        var districtNames=districts.Select(t=>t.PlaceName.RowId).ToHashSet();
+        foreach(var t in sheet.Where(t=>t.IsInUse && t.TerritoryIntendedUse.RowId==0 && t.PlaceNameZone.RowId>0 && !districtNames.Contains(t.PlaceName.RowId)))
+        {
+            var title=t.PlaceNameZone.Value.Name.ExtractText();
+            if(title==t.PlaceNameRegion.Value.Name.ExtractText())title=t.PlaceName.Value.Name.ExtractText();
+            cityNames.TryAdd(t.PlaceNameZone.RowId,title);
+        }
         if(sheet.TryGetRow(144,out var saucer) && saucer.TerritoryIntendedUse.RowId==23)
             cityNames[saucer.PlaceNameZone.RowId]=saucer.PlaceName.Value.Name.ExtractText();
-        Add("Inn","inn","Any inn");
-        foreach(var key in new[]{"district","inside","personal","fc","apartment","chambers"})Add("Housing",key,labels[key]);
-        var districts=sheet.Where(t=>t.TerritoryIntendedUse.RowId==13 && t.PlaceNameRegion.RowId>0)
-            .ToLookup(t=>t.PlaceNameRegion.RowId,t=>"territory:"+t.RowId);
+        Add("Inn","inn",labels["inn"]);
+        foreach(var key in new[]{"housing","district","inside","properties","mine","personal","apartment","fc-properties","fc","chambers"})Add("Housing",key,labels[key]);
+        foreach(var t in districts)Add("Housing","territory:"+t.RowId,t.PlaceName.Value.Name.ExtractText());
+        // One selectable zone per named territory, independent of instance number.
+        var zones=sheet.Where(t=>t.IsInUse && (t.TerritoryIntendedUse.RowId==1 || WardrobeLocationPolicy.FieldOperation(t.TerritoryIntendedUse.RowId)) && t.PlaceName.RowId!=0)
+            .GroupBy(t=>t.PlaceName.RowId).ToDictionary(g=>g.Key,g=>g.Min(t=>t.RowId));
         foreach(var t in sheet)
         {
             var use=t.TerritoryIntendedUse.RowId;
             var key="territory:"+t.RowId;
-            var chain=new List<string>{key};
-            bool ordinary=t.IsInUse && use is (0 or 1 or 2 or 13 or 14 or 23);
-            if(use==14)
+            var chain=new List<string>();
+            bool housing=use is 13 or 14;
+            var district=districts.Where(d=>d.PlaceNameRegion.RowId==t.PlaceNameRegion.RowId).ToArray();
+            string? canonical=null;
+            if(t.IsInUse && t.PlaceName.RowId!=0)
             {
-                chain.Add("inside");
-                var candidates=districts[t.PlaceNameRegion.RowId].Distinct().Take(2).ToArray();
-                if(candidates.Length==1){chain.Add(candidates[0]);chain.Add("district");}
-            }
-            if(ordinary && t.PlaceName.RowId!=0)
-            {
-                string title=t.PlaceName.Value.Name.ExtractText();
-                Add(use==2?"Inn":use is 13 or 14?"Housing":"City or zone",key,title);
-                if(use==2)chain.Add("inn");
-                if(use==13)chain.Add("district");
-                if(cityNames.TryGetValue(t.PlaceNameZone.RowId,out var city))
+                if(housing)
                 {
-                    var cityKey="city:"+t.PlaceNameZone.RowId;
-                    Add("City or zone",cityKey,city);
-                    chain.Add(cityKey);
-                    chain.Add("cities");
+                    chain.Add(use==14?"inside":"district");
+                    if(district.Length==1)chain.Add("territory:"+district[0].RowId);
+                    chain.Add("housing");
+                    if(use==13)canonical=key;
                 }
-                if(t.PlaceNameRegion.RowId!=0)
+                else if(use==2)
+                {
+                    chain.Add("inn");
+                    // An old single-inn rule must not silently become an all-inn rule.
+                }
+                if(!housing && (use is 0 or 2 or 23) && cityNames.TryGetValue(t.PlaceNameZone.RowId,out var city))
+                {
+                    var hub="city:"+t.PlaceNameZone.RowId;
+                    Add("Hub",hub,city);chain.Add(hub);chain.Add("cities");
+                    aliases[hub]=hub;
+                    if(use!=2)canonical=hub;
+                }
+                if(zones.TryGetValue(t.PlaceName.RowId,out var zone) && (use==1 || WardrobeLocationPolicy.FieldOperation(use)))
+                {
+                    canonical="territory:"+zone;
+                    Add("Zone",canonical,t.PlaceName.Value.Name.ExtractText());chain.Add(canonical);
+                }
+                if((housing || use is 0 or 1 or 2 or 23 || WardrobeLocationPolicy.FieldOperation(use)) && t.PlaceNameRegion.RowId is not (0 or 2405))
                 {
                     var region="region:"+t.PlaceNameRegion.RowId;
-                    Add("Region",region,t.PlaceNameRegion.Value.Name.ExtractText());
-                    chain.Add(region);
+                    Add("Region",region,t.PlaceNameRegion.Value.Name.ExtractText());chain.Add(region);aliases[region]=region;
                 }
             }
-            chain.Add("any");chains[key]=chain.ToArray();
+            if(canonical!=null)aliases[key]=canonical;
+            chain.Add("any");chains[key]=chain.Distinct().ToArray();
         }
-        foreach(var map in maps.Where(m=>m.PlaceNameSub.RowId!=0))
-        {
-            if(!sheet.TryGetRow(map.TerritoryType.RowId,out var t) || t.TerritoryIntendedUse.RowId is not (0 or 1 or 13 or 23))continue;
-            if(map.PlaceNameSub.RowId==map.PlaceName.RowId)continue;
-            var key="map:"+map.RowId;
-            if(t.PlaceName.RowId==map.PlaceNameSub.RowId)
-            {
-                Add("Named area","territory:"+t.RowId,map.PlaceNameSub.Value.Name.ExtractText());
-                continue;
-            }
-            Add("Named area",key,map.PlaceNameSub.Value.Name.ExtractText());
-            chains[key]=[key,..Parents("territory:"+t.RowId)];
-        }
+        foreach(var key in new[]{"any","inn","cities","housing","district","inside","properties","mine","personal","apartment","fc-properties","fc","chambers"})aliases[key]=key;
     }
+    internal string? Canonical(string key){Ensure();return aliases.GetValueOrDefault(key);}
     private string[] Parents(string key)=>chains.GetValueOrDefault(key)??[key,"any"];
     internal IEnumerable<string[]> PreviewPlaces(string key)
     {
         Ensure();
-        if(chains.TryGetValue(key,out var exact))return [exact];
-        if(key.StartsWith("area:"))return [[key,..Parents("territory:"+key.Split(':')[1])]];
+        if(chains.TryGetValue(key,out var exact))return [exact.SkipWhile(p=>p!=key).ToArray()];
+
         var ancestors=chains.Values.Where(c=>c.Contains(key)).Select(c=>c.SkipWhile(p=>p!=key).ToArray()).DistinctBy(c=>string.Join("|",c)).ToArray();
         if(ancestors.Length>0)return ancestors;
-        if(key is "personal" or "fc" or "apartment" or "chambers")return chains.Values.Where(c=>c.Contains("inside")).Select(c=>new[]{key}.Concat(c).ToArray());
+        if(WardrobeLocationPolicy.PropertyChain(key) is {Length:>0} properties)return chains.Values.Where(c=>c.Contains("inside")).Select(c=>properties.Concat(c).Distinct().ToArray());
         return [key=="any"?["any"]:[key,"any"]];
     }
     internal IEnumerable<string[]> PreviewJobs(string key)
@@ -146,25 +153,12 @@ internal sealed class WardrobeLocations(ExcelSheet<ClassJob> jobSheet,ExcelSheet
             foreach(var (type,key) in new[]{(EstateType.PersonalEstate,"personal"),(EstateType.FreeCompanyEstate,"fc"),(EstateType.ApartmentRoom,"apartment"),(EstateType.PersonalChambers,"chambers")})
             {
                 var owned=HousingManager.GetOwnedHouseId(type);
-                if(home.Id!=0 && home.Id!=ulong.MaxValue && home.Id==owned.Id)result.Insert(0,key);
+                if(home.Id!=0 && home.Id!=ulong.MaxValue && home.Id==owned.Id)
+                {result.AddRange(WardrobeLocationPolicy.PropertyChain(key));break;}
             }
             if(home.Id!=0 && home.Id!=ulong.MaxValue && chains.TryGetValue("territory:"+home.TerritoryTypeId,out var district) && district.Contains("district"))
-                parent=new[]{parent[0],"inside"}.Concat(district).Distinct().ToArray();
+                parent=new[]{"inside"}.Concat(district.Where(p=>p!="district")).Distinct().ToArray();
         }
-        if(chains.TryGetValue("map:"+map,out var area) && area.Contains("territory:"+territory))result.Add("map:"+map);
-        var baseChain=result.Concat(parent).Distinct().ToArray();
-        if(parent.Any(p=>p.StartsWith("region:")) && TerritoryInfo.Instance() is var info && info!=null)
-        {
-            foreach(uint place in new uint[]{info->AreaPlaceNameId,info->SubAreaPlaceNameId})
-            {
-                if(place==0 || !names.TryGetRow(place,out var row))continue;
-                var key=$"area:{territory}:{place}";
-                if(result.Contains(key))continue;
-                if(territories.TryGetRow(territory,out var t) && (place==t.PlaceName.RowId || place==t.PlaceNameZone.RowId || place==t.PlaceNameRegion.RowId))continue;
-                Add("Named area",key,row.Name.ExtractText());
-                baseChain=[key,..baseChain];chains[key]=baseChain;result.Insert(0,key);
-            }
-        }
-        return baseChain;
+        return result.Concat(parent).Distinct().ToArray();
     }
 }

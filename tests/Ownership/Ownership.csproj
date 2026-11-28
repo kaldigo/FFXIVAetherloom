@@ -15,6 +15,7 @@
     <Compile Include="../../Aetherloom/WardrobeWeapons.cs" />
     <Compile Include="../../Aetherloom/WardrobeWearability.cs" />
     <Compile Include="../../Aetherloom/WardrobeAssignment.cs" />
+    <Compile Include="../../Aetherloom/WardrobeLocationPolicy.cs" />
     <Reference Include="Newtonsoft.Json">
       <HintPath Condition="Exists('$(DALAMUD_HOME)/Newtonsoft.Json.dll')">$(DALAMUD_HOME)/Newtonsoft.Json.dll</HintPath>
       <HintPath Condition="!Exists('$(DALAMUD_HOME)/Newtonsoft.Json.dll')">$(APPDATA)/XIVLauncher/addon/Hooks/dev/Newtonsoft.Json.dll</HintPath>
