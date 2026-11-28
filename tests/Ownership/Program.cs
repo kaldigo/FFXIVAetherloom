@@ -179,7 +179,9 @@ var simplified=new JObject{["100"]=new JObject{["Rules"]=new JObject{
     ["city:500|any"]=cityWar.ToString(),["territory:128|any"]=cityWar.ToString(),
     ["territory:129|any"]=regional.ToString(),["area:128:5|any"]=regional.ToString(),
     ["territory:282|job:21"]=cityWar.ToString(),["personal|any"]=cityTank.ToString(),
-    ["territory:135|any"]=regional.ToString()}}};
+    ["territory:135|any"]=regional.ToString(),
+    ["territory:128|job:21"]=cityWar.ToString(),["territory:129|job:21"]=regional.ToString(),
+    ["territory:128|job:19"]=cityWar.ToString(),["territory:129|job:19"]=cityWar.ToString()}}};
 string? CanonicalPlace(string place)=>place switch {
     "territory:128" or "territory:129"=>"city:500",
     "area:128:5" or "territory:282"=>null,
@@ -187,9 +189,11 @@ string? CanonicalPlace(string place)=>place switch {
 Demand(WardrobeLocationPolicy.Migrate(simplified,CanonicalPlace),"Location migration runs once");
 var simplifiedSettings=(JObject)simplified["100"]!;
 var simplifiedRules=(JObject)simplifiedSettings["Rules"]!;
-Demand(simplifiedRules.Count==3 && WardrobeAssignment.Owner(simplifiedRules,"city:500|any")==cityWar,"Canonical rule wins; same-owner aliases deduplicate");
-Demand(simplifiedSettings["ReviewRules"] is JObject {Count:3},"Conflicts, removed areas and house sizes remain available for review");
+Demand(simplifiedRules.Count==4 && WardrobeAssignment.Owner(simplifiedRules,"city:500|any")==cityWar,"Canonical rule wins; same-owner aliases deduplicate");
+Demand(simplifiedSettings["ReviewRules"] is JObject {Count:5},"Conflicts, removed areas and house sizes remain available for review");
 Demand(simplifiedSettings["ReviewRules"]?["territory:129|any"]?["Design"]?.ToString()==regional.ToString(),"Conflicting owner is retained");
+Demand(simplifiedRules["city:500|job:21"]==null,"Conflicting aliases without an existing canonical owner do not choose a winner");
+Demand(WardrobeAssignment.Owner(simplifiedRules,"city:500|job:19")==cityWar,"Same-owner aliases without a canonical rule migrate once");
 var migratedSnapshot=simplified.DeepClone();
 Demand(!WardrobeLocationPolicy.Migrate(simplified,CanonicalPlace) && JToken.DeepEquals(simplified,migratedSnapshot),"Migration is idempotent including review entries");
 foreach(var property in new[]{"personal","apartment","fc","chambers"})
