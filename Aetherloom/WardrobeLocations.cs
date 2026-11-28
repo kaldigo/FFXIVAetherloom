@@ -88,16 +88,12 @@ internal sealed class WardrobeLocations(ExcelSheet<ClassJob> jobSheet,ExcelSheet
             bool housing=use is 13 or 14;
             var district=districts.Where(d=>d.PlaceNameRegion.RowId==t.PlaceNameRegion.RowId).ToArray();
             string? canonical=null;
+            // Classify housing before checking labels: remodelled halls have unnamed rows.
+            chain.AddRange(WardrobeLocationPolicy.HousingChain(use,district.Length==1?"territory:"+district[0].RowId:null));
             if(t.IsInUse && t.PlaceName.RowId!=0)
             {
-                if(housing)
-                {
-                    chain.Add(use==14?"inside":"district");
-                    if(district.Length==1)chain.Add("territory:"+district[0].RowId);
-                    chain.Add("housing");
-                    if(use==13)canonical=key;
-                }
-                else if(use==2)
+                if(use==13)canonical=key;
+                if(use==2)
                 {
                     chain.Add("inn");
                     // An old single-inn rule must not silently become an all-inn rule.
@@ -142,6 +138,7 @@ internal sealed class WardrobeLocations(ExcelSheet<ClassJob> jobSheet,ExcelSheet
         Ensure();
         return key.StartsWith("job:") && uint.TryParse(key.AsSpan(4),out var id)?[JobChain(id)]:jobs.Values.Where(chain=>chain.Contains(key));
     }
+    internal string Diagnostic {get;private set;}="";
     internal unsafe string[] Current(uint territory,uint map)
     {
         Ensure();
@@ -159,6 +156,8 @@ internal sealed class WardrobeLocations(ExcelSheet<ClassJob> jobSheet,ExcelSheet
             if(home.Id!=0 && home.Id!=ulong.MaxValue && chains.TryGetValue("territory:"+home.TerritoryTypeId,out var district) && district.Contains("district"))
                 parent=new[]{"inside"}.Concat(district.Where(p=>p!="district")).Distinct().ToArray();
         }
-        return result.Concat(parent).Distinct().ToArray();
+        var chain=result.Concat(parent).Distinct().ToArray();
+        Diagnostic=$"territory {territory}; location chain {string.Join(" > ",chain)}";
+        return chain;
     }
 }

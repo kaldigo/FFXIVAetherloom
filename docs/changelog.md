@@ -1,1 +1,1 @@
-Simplify assignments into Anywhere, Region, Hub, Zone, Inn and Housing. Add field-operation zones, district-wide housing and personal/FC property groups with the new priority order. Migrate equivalent rules without duplicates; retain removed or conflicting assignments for review and back up the original wardrobe file.
+Fix personal and FC property assignments inside remodelled housing interiors with no territory display name. Preserve housing detection before label filtering and log resolved location chains for assignment diagnostics.

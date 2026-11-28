@@ -204,6 +204,10 @@ foreach(var property in new[]{"personal","apartment","fc","chambers"})
 }
 Demand(WardrobeLocationPolicy.FieldOperation(41) && WardrobeLocationPolicy.FieldOperation(48) && WardrobeLocationPolicy.FieldOperation(61)
     && !WardrobeLocationPolicy.FieldOperation(3),"Eureka, Bozja and new field operations are included without dungeons");
+Demand(WardrobeLocationPolicy.HousingChain(14,null).SequenceEqual(new[]{"inside","housing"}),"Unnamed remodelled housing is still an interior");
+var remodelledHall=WardrobeLocationPolicy.PropertyChain("fc").Concat(WardrobeLocationPolicy.HousingChain(14,null)).Append("any").ToArray();
+var fcRules=new JObject{["any|job:21"]=regional.ToString(),["properties|any"]=cityWar.ToString()};
+Demand(WardrobeAssignment.Winner(fcRules,remodelledHall,warrior,Visible)?.Design==cityWar,"My and FC properties overrides the job outfit in a remodelled FC hall");
 var housingPriorities=new[]{"personal","mine","properties","inside","territory:339","housing","region:22","any"};
 var priorityRules=new JObject();
 for(int i=housingPriorities.Length-1;i>=0;i--)

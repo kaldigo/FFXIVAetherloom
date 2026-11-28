@@ -80,6 +80,7 @@ internal sealed partial class WardrobeWindow
                 throw new System.IO.InvalidDataException("An assignment changed. Review the selections and try again.");
         });
     }
+    internal string AssignmentContext=>locations.Diagnostic;
     internal bool TryAssignment(uint job,uint territory,uint map,out WardrobeAssignment assignment)
     {
         assignment=default;

@@ -17,7 +17,7 @@ internal sealed class WardrobeAssignments : IDisposable
     private long nextCheck;
     private int modeRevision;
     private nint finalizedActor;
-    private string? lastError;
+    private string? lastError, lastContext;
 
     // Glamourer's StateFinalized provider registers this label in the current API.
     private const string Finalized="Penumbra.StateFinalized";
@@ -50,6 +50,8 @@ internal sealed class WardrobeAssignments : IDisposable
             if(actor==null || condition[ConditionFlag.BetweenAreas] || condition[ConditionFlag.BetweenAreas51]
                 || !window.TryAssignment(actor.ClassJob.RowId,client.TerritoryType,client.MapId,out var target))
             {observed=applied=null;return;}
+            var context=$"{window.AssignmentContext}; job {target.Job}; design {target.Design}";
+            if(lastContext!=context){log.Information("Wardrobe assignment resolved: "+context);lastContext=context;}
             if(target!=observed || (finalized!=0 && finalized==actor?.Address))
             {
                 // Let the new actor/gearset settle, then resolve again before applying.

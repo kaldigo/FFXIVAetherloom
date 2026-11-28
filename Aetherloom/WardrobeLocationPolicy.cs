@@ -13,6 +13,11 @@ internal static class WardrobeLocationPolicy
         _=>[],
     };
 
+    // Generic/remodelled interiors have no display name or region in TerritoryType.
+    internal static string[] HousingChain(uint use,string? district)=>use is 13 or 14
+        ?new[]{use==14?"inside":"district"}.Concat(district==null?Array.Empty<string>():new[]{district}).Append("housing").ToArray()
+        :[];
+
     internal static bool FieldOperation(uint use)=>use is 41 or 48 or 61;
 
     // All characters migrate together. Removed or conflicting rules are retained for review.
